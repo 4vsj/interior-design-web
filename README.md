@@ -2,6 +2,8 @@
 
 2D and 3D interior design website for customising your room and seeing how it will look. The first tool is a bedroom planner. Static site (Vite + Three.js), no backend, no login.
 
+Live site: https://4vsj.github.io/interior-design-web/ (rebuilt automatically on every push to main).
+
 ## Run
 
 Needs Node.js 20.19+ or 22.12+ (check with `node -v`). Run the commands in the repository root, the folder with `package.json`.
