@@ -10,7 +10,7 @@ import {
 } from './ensuite.js';
 import {
   addBed, addCloset, addDesk, addEnsuite, addWalkin, addLight, addOpening, addStrip, ATTACH, clampOpeningHeights, deleteSelected, duplicateSelected,
-  EFFECTS, LIGHT_TYPES, LIMITS, maxCord, rotateSelected, setMode, store, stripTargets, SWINGS, TEMPS,
+  EFFECTS, hideTip, LIGHT_TYPES, LIMITS, maxCord, rotateSelected, setMode, showHiddenTips, store, stripTargets, SWINGS, TEMPS,
 } from './state.js';
 import {
   CASES, CHAIRS, COMPUTER, COOLERS, DESK_LIMITS, FINISHES, GPUS, KEYBOARDS, MONITORS, PARTS,
@@ -200,6 +200,33 @@ const itemActions = (rotate, duplicate = true) => `<div class="btnrow">
   <button data-act="delete" class="danger" title="Shortcut: Delete">Delete</button></div>`;
 
 let lastSelKey = '';
+
+// collapsed sections, remembered in this browser
+const FOLD_KEY = 'bedroom-planner:folded';
+const folded = (() => {
+  try {
+    const v = JSON.parse(localStorage.getItem(FOLD_KEY) || '[]');
+    return new Set(Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []);
+  } catch {
+    return new Set();
+  }
+})();
+function saveFolded() {
+  try {
+    localStorage.setItem(FOLD_KEY, JSON.stringify([...folded]));
+  } catch {
+    /* storage blocked: folding still works for this visit */
+  }
+}
+const slug = (t) => t.toLowerCase().replace(/[^a-z]+/g, '-');
+/** Section headers become buttons that fold the section away. */
+function foldable(html) {
+  return html.replace(/<section><h2>([^<]+)<\/h2>/g, (_, title) => {
+    const f = slug(title);
+    const open = !folded.has(f);
+    return `<section${open ? '' : ' class="folded"'}><h2><button class="fold" data-fold="${f}" aria-expanded="${open}">${title}</button></h2>`;
+  });
+}
 const reduceMotion = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 function render(panel) {
@@ -209,12 +236,18 @@ function render(panel) {
   const issues = store.analysis.issues;
   let html = '';
 
-  if (issues.length) {
-    html += '<section class="issues" aria-live="polite">';
-    for (const i of issues) {
-      html += `<button class="issue ${i.level}" data-sel="${i.kind}:${i.id}">${esc(i.text)}</button>`;
+  // problems first, closed tips out of the way
+  const shown = issues.filter((i) => !i.hidden).sort((a, b) => (a.level === 'error' ? 0 : 1) - (b.level === 'error' ? 0 : 1));
+  const hiddenCount = issues.length - shown.length;
+  if (shown.length || hiddenCount) {
+    html += '<div class="issues" aria-live="polite">';
+    for (const i of shown) {
+      html += `<div class="issue ${i.level}"><button class="issue-text" data-sel="${i.kind}:${i.id}" title="${esc(i.text)}">${esc(i.text)}</button>`;
+      if (i.level === 'tip') html += `<button class="issue-x" data-hide="${esc(i.key)}" title="Hide this tip" aria-label="Hide this tip">×</button>`;
+      html += '</div>';
     }
-    html += '</section>';
+    if (hiddenCount) html += `<button class="linkish" data-act="show-tips">Show ${hiddenCount} hidden tip${hiddenCount > 1 ? 's' : ''}</button>`;
+    html += '</div>';
   }
 
   html += `<section><h2>Room</h2>
@@ -226,7 +259,7 @@ function render(panel) {
 
   html += `<section><h2>Doors and windows</h2>
     <div class="btnrow"><button class="add" data-act="add-door">+ Add door</button><button class="add" data-act="add-window">+ Add window</button></div>`;
-  if (!d.openings.length) html += '<p class="empty">None yet. Added doors and windows can be dragged along the walls.</p>';
+  if (!d.openings.length) html += '<p class="empty">Drag them along the walls once added.</p>';
   html += '<ul class="items">';
   for (const op of d.openings) {
     const isSel = sel && sel.kind === 'opening' && sel.id === op.id;
@@ -239,7 +272,7 @@ function render(panel) {
 
   html += `<section><h2>Beds</h2>
     <div class="btnrow"><button class="add" data-act="add-bed">+ Add bed</button></div>`;
-  if (!d.beds.length) html += '<p class="empty">None yet. Added beds can be dragged in either view.</p>';
+  if (!d.beds.length) html += '<p class="empty">Drag beds in either view.</p>';
   html += '<ul class="items">';
   for (const bed of d.beds) {
     const isSel = sel && sel.kind === 'bed' && sel.id === bed.id;
@@ -253,7 +286,7 @@ function render(panel) {
 
   html += `<section><h2>Desk setups</h2>
     <div class="btnrow"><button class="add" data-act="add-desk">+ Add desk setup</button></div>`;
-  if (!d.desks.length) html += '<p class="empty">Adds a desk, chair, monitor, keyboard and PC together. Drag any piece to move the group, or click a piece to edit it.</p>';
+  if (!d.desks.length) html += '<p class="empty">Desk, chair and PC as one group. The PC is optional.</p>';
   html += '<ul class="items">';
   for (const k of d.desks) {
     const isSel = sel && sel.kind === 'desk' && sel.id === k.id;
@@ -267,7 +300,7 @@ function render(panel) {
 
   html += `<section><h2>Closets</h2>
     <div class="btnrow"><button class="add" data-act="add-closet">+ Add closet</button></div>`;
-  if (!d.closets.length) html += '<p class="empty">Wardrobes with hinged or sliding doors, or an open rail. They show how much room the doors need.</p>';
+  if (!d.closets.length) html += '<p class="empty">Hinged, sliding or open wardrobes.</p>';
   html += '<ul class="items">';
   for (const c of d.closets) {
     const isSel = sel && sel.kind === 'closet' && sel.id === c.id;
@@ -282,7 +315,7 @@ function render(panel) {
   html += '<section><h2>Ensuite bathroom</h2>';
   if (!d.ensuite) {
     html += `<div class="btnrow"><button class="add" data-act="add-ensuite">+ Add ensuite</button></div>
-      <p class="empty">Walls off one corner as a bathroom with its own door, shower or bath, toilet and basin.</p>`;
+      <p class="empty">A walled-off bathroom in one corner.</p>`;
   } else {
     const e = d.ensuite;
     const isSel = sel && sel.kind === 'ensuite';
@@ -297,7 +330,7 @@ function render(panel) {
   html += '<section><h2>Walk-in closet</h2>';
   if (!d.walkin) {
     html += `<div class="btnrow"><button class="add" data-act="add-walkin">+ Add walk-in closet</button></div>
-      <p class="empty">Walls off one corner as a walk-in closet and changing room, with its own door, rails, shelves, a mirror and a bench.</p>`;
+      <p class="empty">A walled-off changing room in one corner.</p>`;
   } else {
     const e = d.walkin;
     const isSel = sel && sel.kind === 'walkin';
@@ -314,7 +347,7 @@ function render(panel) {
     <div class="field"><span>Time of day</span><div class="toggle small" role="group" aria-label="Time of day">
       <button data-act="mode-day" aria-pressed="${!night}">Day</button><button data-act="mode-night" aria-pressed="${night}">Night</button></div></div>
     <div class="btnrow"><button class="add" data-act="add-light">+ Ceiling light</button><button class="add" data-act="add-strip">+ LED strip</button></div>`;
-  if (!d.lighting.lights.length && !d.lighting.strips.length) html += '<p class="empty">Switch to night and add a light to see it glow in the 3D view.</p>';
+  if (!d.lighting.lights.length && !d.lighting.strips.length) html += '<p class="empty">Switch to night to see lights glow in 3D.</p>';
   html += '<ul class="items">';
   d.lighting.lights.forEach((l, i) => {
     const isSel = sel && sel.kind === 'light' && sel.id === l.id;
@@ -336,8 +369,17 @@ function render(panel) {
   const active = document.activeElement;
   const focusKey = active && panel.contains(active) ? active.dataset.key || active.dataset.act || active.dataset.sel : null;
   const scroll = panel.scrollTop;
-  panel.innerHTML = html;
+  panel.innerHTML = foldable(html);
   panel.scrollTop = scroll;
+  for (const sec of panel.querySelectorAll('section.folded')) {
+    // a section never hides the thing being edited
+    if (sec.querySelector('li.sel')) {
+      sec.classList.remove('folded');
+      sec.querySelector('.fold').setAttribute('aria-expanded', 'true');
+    }
+    const n = sec.querySelectorAll('ul.items > li').length;
+    if (n) sec.querySelector('.fold').dataset.count = n;
+  }
   // a new selection brings its fields into view, wherever the panel was scrolled to
   const selKey = sel ? `${sel.kind}:${sel.id}` : '';
   if (selKey && selKey !== lastSelKey) {
@@ -588,7 +630,17 @@ function onClick(e) {
   else if (act === 'delete') deleteSelected();
   else if (act === 'duplicate') duplicateSelected();
   else if (act === 'rotate') rotateSelected();
-  else if (btn.dataset.sel) {
+  else if (act === 'show-tips') showHiddenTips();
+  else if (btn.dataset.hide) hideTip(btn.dataset.hide);
+  else if (btn.dataset.fold) {
+    const f = btn.dataset.fold;
+    if (folded.has(f)) folded.delete(f);
+    else folded.add(f);
+    saveFolded();
+    // folding away the item being edited drops the selection with it
+    if (folded.has(f) && btn.closest('section').querySelector('li.sel')) store.select(null);
+    else render(btn.closest('.panel'));
+  } else if (btn.dataset.sel) {
     const [kind, id] = btn.dataset.sel.split(':');
     const same = store.selected && store.selected.id === id;
     store.select(same && btn.classList.contains('item') ? null : { kind, id, part: kind === 'desk' ? 'setup' : undefined });

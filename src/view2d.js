@@ -712,9 +712,12 @@ export function createPlanView(canvas, store) {
     fillR({ x0: 0, y0: 0, x1: room.width, y1: room.length });
     drawGrid(room);
 
-    // walkway and chair zones under the furniture (hidden while only viewing)
+    // walkway and chair zones under the furniture: the selected item's, plus any that are blocked
+    // and not waved off. Hidden while only viewing.
     for (const item of store.viewOnly ? [] : [...d.beds, ...d.desks, ...d.closets]) {
+      const mine = sel && sel.id === item.id;
       for (const strip of a.items[item.id].strips) {
+        if (!mine && (strip.ok || strip.hidden)) continue;
         ctx.fillStyle = strip.ok ? C.okStrip : C.badStrip;
         fillR(strip.rect);
         ctx.strokeStyle = strip.ok ? C.okStroke : C.badStroke;

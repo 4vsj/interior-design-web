@@ -30,7 +30,9 @@ npm run build    # static site in dist/, deployable to any static host
 - Walk-in closet and changing room: a walled-off room with its own door, a hanging rail, optional shelves and drawers, a full-length mirror and a bench. A tip shows when there's less than 80 cm of floor to stand in.
 - Desk setups can leave out the PC, or the whole computer, so a desk can stand on its own.
 - View only mode (V): hides the panel and editing buttons, and nothing can be selected, dragged or changed while you move the camera.
-- Undo, redo, delete, duplicate. Autosaves to localStorage; export and import as JSON.
+- Undo, redo, delete (with an Undo button in the message), duplicate. Autosaves to localStorage; export and import as JSON.
+- Compact tips at the top of the panel. The × on a tip hides it and its floor zone for good; "Show hidden tips" brings them back. Floor zones only show for the selected item or where something is blocked.
+- Panel sections fold away from their headers and stay folded across visits. Selecting something opens its section.
 
 ## Shortcuts
 

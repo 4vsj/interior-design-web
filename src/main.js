@@ -75,17 +75,30 @@ function setView(v) {
 }
 
 let toastTimer = null;
-function toast(msg) {
+/** A short message. With undo, it carries an Undo button for the step that was just made. */
+function toast(msg, undo = false) {
   const t = $('#toast');
-  t.textContent = msg;
+  t.textContent = '';
+  const span = document.createElement('span');
+  span.textContent = msg;
+  t.append(span);
+  if (undo) {
+    const b = document.createElement('button');
+    b.textContent = 'Undo';
+    b.addEventListener('click', () => {
+      store.undo();
+      t.hidden = true;
+    });
+    t.append(b);
+  }
   t.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (t.hidden = true), 4500);
+  toastTimer = setTimeout(() => (t.hidden = true), undo ? 6000 : 4500);
 }
 
 store.subscribe((st, evt) => {
   if (evt && evt.flash) {
-    toast(evt.flash);
+    toast(evt.flash, evt.undo);
     return;
   }
   panel.render();
@@ -104,7 +117,7 @@ $('#cam-eye').addEventListener('click', () => scene && scene.eyeLevel());
 $('#redo').addEventListener('click', () => store.redo());
 $('#new').addEventListener('click', () => {
   newDesign();
-  toast('Started a new room. Undo brings the old one back.');
+  toast('Started a new room.', true);
 });
 
 $('#export').addEventListener('click', () => {

@@ -266,6 +266,7 @@ export function analyze(design) {
   const desks = design.desks || [];
   const closets = design.closets || [];
   // walled-off corners: the ensuite and the walk-in closet
+  const hiddenTips = new Set(design.hidden || []);
   const zones = [design.ensuite, design.walkin].filter(Boolean).map((z) => ({ z, L: ensuiteLayout(room, z), name: ZONE_NAME[z.id] }));
   const zoneOf = (id) => zones.find((x) => x.z.id === id);
   // every solid footprint, tagged with its owner
@@ -289,6 +290,13 @@ export function analyze(design) {
     const err = (text) => {
       st.error = true;
       issues.push({ level: 'error', id: o.item.id, kind: o.kind, text: cap(text) });
+    };
+    // a tip the person closed stays closed, and so does its zone on the plan
+    const tip = (code, text) => {
+      const key = `${o.item.id}|${code}`;
+      const hidden = hiddenTips.has(key);
+      issues.push({ level: 'tip', id: o.item.id, kind: o.kind, code, key, hidden, text });
+      if (hidden && STRIP_TIPS.has(code)) for (const sp of st.strips) if (!sp.ok) sp.hidden = true;
     };
     if (o.rects.some((r) => !rectInside(r, roomRect))) err(`${o.name} runs into a wall.`);
     for (let j = i + 1; j < owners.length; j++) {
@@ -319,7 +327,7 @@ export function analyze(design) {
       if (shortSides === 1) where.push('one side');
       if (shortFoot) where.push('the foot');
       if (where.length) {
-        issues.push({ level: 'tip', id: o.item.id, kind: o.kind, text: `${o.name} has less than ${design.units === 'ft' ? '2 ft' : '60 cm'} of walkway at ${where.join(' and ')}.` });
+        tip('walkway', `${o.name}: under ${design.units === 'ft' ? '2 ft' : '60 cm'} to walk past at ${where.join(' and ')}.`);
       }
     } else if (o.kind === 'closet') {
       const z = closetFrontZone(o.item);
@@ -330,21 +338,21 @@ export function analyze(design) {
       if (!ok) {
         const cm = design.units === 'ft' ? `${Math.round(z.need / 0.3048 * 10) / 10} ft` : `${Math.round(z.need * 100)} cm`;
         const what = o.item.closet.style === 'open' ? 'to reach the rail' : 'to open the doors';
-        issues.push({ level: 'tip', id: o.item.id, kind: o.kind, text: `${o.name} has less than ${cm} in front ${what}.` });
+        tip('front', `${o.name}: under ${cm} in front ${what}.`);
       }
     } else if (o.kind === 'ensuite' || o.kind === 'walkin') {
       const zn = zoneOf(o.kind);
       const N = cap(zn.name);
       for (const t of zn.L.missing) {
-        issues.push({ level: 'tip', id: o.item.id, kind: o.kind, text: `${N} is too small for the ${FIXTURE_NAME[t]}. Make it bigger or remove something.` });
+        tip(`missing-${t}`, `${N}: no room for the ${FIXTURE_NAME[t]}.`);
       }
       if (zn.L.swing && !zn.L.swing.inward) {
         const hit = zn.L.fixtures.find((f) => f.type !== 'mirror' && rectHitsSwing(f.rect, zn.L.swing));
-        if (hit) issues.push({ level: 'tip', id: o.item.id, kind: o.kind, text: `${N} door hits the ${FIXTURE_NAME[hit.type]} when it opens. Move the door or make it sliding.` });
+        if (hit) tip('door', `${N} door hits the ${FIXTURE_NAME[hit.type]}.`);
       }
       const c = zn.L.clear;
       if (c && Math.min(c.x1 - c.x0, c.y1 - c.y0) < STAND - 1e-6) {
-        issues.push({ level: 'tip', id: o.item.id, kind: o.kind, text: `${N} has less than ${design.units === 'ft' ? '2.5 ft' : '80 cm'} of floor to stand and get changed.` });
+        tip('stand', `${N}: under ${design.units === 'ft' ? '2.5 ft' : '80 cm'} of floor to get changed.`);
       }
     } else {
       const L = deskLayout(o.item);
@@ -353,10 +361,10 @@ export function analyze(design) {
       const draw = clipToRoom(wr, room);
       if (nonEmpty(draw)) st.strips.push({ rect: draw, ok });
       if (!ok) {
-        issues.push({ level: 'tip', id: o.item.id, kind: o.kind, text: `${o.name} has less than ${design.units === 'ft' ? '2.5 ft' : '75 cm'} behind the desk for the chair.` });
+        tip('chair', `${o.name}: under ${design.units === 'ft' ? '2.5 ft' : '75 cm'} behind the desk for the chair.`);
       }
       if (L.monTooWide) {
-        issues.push({ level: 'tip', id: o.item.id, kind: o.kind, text: `${o.name}: the monitors are wider than the free desk space.` });
+        tip('monitors', `${o.name}: monitors are wider than the free desk.`);
       }
     }
   });
@@ -364,3 +372,6 @@ export function analyze(design) {
 }
 
 export { MATTRESS };
+
+// tips that are about a zone drawn on the floor
+const STRIP_TIPS = new Set(['walkway', 'front', 'chair']);

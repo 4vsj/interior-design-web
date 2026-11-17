@@ -50,6 +50,7 @@ export function defaultDesign() {
     ensuite: null,
     walkin: null,
     lighting: { mode: 'day', lights: [], strips: [] },
+    hidden: [], // tips the person closed, as 'itemId|code'
   };
 }
 
@@ -232,6 +233,11 @@ export function normalize(raw) {
     };
     if (stripTargetValid(d, strip)) d.lighting.strips.push(strip);
   }
+  const ids = new Set([...seen, 'ensuite', 'walkin']);
+  for (const h of Array.isArray(raw.hidden) ? raw.hidden : []) {
+    if (typeof h !== 'string' || h.length > 64 || d.hidden.includes(h)) continue;
+    if (ids.has(h.split('|')[0])) d.hidden.push(h);
+  }
   return d;
 }
 
@@ -281,6 +287,7 @@ export function exportable(design) {
     ensuite: design.ensuite,
     walkin: design.walkin,
     lighting: design.lighting,
+    hidden: design.hidden,
   };
 }
 
@@ -393,9 +400,9 @@ export const store = {
     if (!s) return;
     if (!listFor(this.design, s.kind).some((x) => x.id === s.id)) this.selected = null;
   },
-  flash(msg) {
+  flash(msg, undo = false) {
     this.flashMsg = msg;
-    for (const fn of this.subs) fn(this, { flash: msg });
+    for (const fn of this.subs) fn(this, { flash: msg, undo });
   },
   selectedItem(design = this.design) {
     const s = this.selected;
@@ -551,10 +558,27 @@ export function setMode(mode) {
   store.commit((d) => { d.lighting.mode = mode; });
 }
 
+/** Close a tip for good. Undo brings it back. */
+export function hideTip(key) {
+  store.commit((d) => {
+    if (!d.hidden.includes(key)) d.hidden.push(key);
+  });
+}
+
+export function showHiddenTips() {
+  store.commit((d) => { d.hidden = []; });
+}
+
+const KIND_NAME = {
+  bed: 'bed', opening: 'door or window', desk: 'desk setup', closet: 'closet',
+  ensuite: 'ensuite', walkin: 'walk-in closet', light: 'light', strip: 'LED strip',
+};
+
 export function deleteSelected() {
   const s = store.selected;
   if (!s) return;
-  store.commit((d) => {
+  const ok = store.commit((d) => {
+    d.hidden = d.hidden.filter((h) => h.split('|')[0] !== s.id);
     if (s.kind === 'bed') d.beds = d.beds.filter((b) => b.id !== s.id);
     else if (s.kind === 'opening') d.openings = d.openings.filter((o) => o.id !== s.id);
     else if (s.kind === 'desk') d.desks = d.desks.filter((k) => k.id !== s.id);
@@ -566,6 +590,7 @@ export function deleteSelected() {
     // strips go with the bed or desk they were stuck to
     d.lighting.strips = d.lighting.strips.filter((t) => stripTargetValid(d, t));
   });
+  if (ok) store.flash(`Deleted the ${KIND_NAME[s.kind]}.`, true);
 }
 
 export function duplicateSelected() {

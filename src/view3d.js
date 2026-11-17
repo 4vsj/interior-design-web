@@ -681,7 +681,7 @@ export function createScene(container, store) {
       const st = store.analysis.items[k.id];
       const showK = selD && selD.kind === 'desk' && selD.id === k.id;
       for (const strip of st.strips) {
-        if (!showK && strip.ok) continue; // keep the 3D floor clean: zones show when selected or blocked
+        if (!showK && (strip.ok || strip.hidden)) continue; // keep the 3D floor clean: zones show when selected or blocked
         overlayGroup.add(floorPoly(rectPts(strip.rect), strip.ok ? 0x22c55e : 0xf59e0b, strip.ok ? 0.14 : 0.35, 0.003));
       }
       const isSel = selD && selD.kind === 'desk' && selD.id === k.id;
@@ -709,7 +709,7 @@ export function createScene(container, store) {
       const st = store.analysis.items[c.id];
       const show = selC && selC.kind === 'closet' && selC.id === c.id;
       for (const strip of st.strips) {
-        if (!show && strip.ok) continue;
+        if (!show && (strip.ok || strip.hidden)) continue;
         overlayGroup.add(floorPoly(rectPts(strip.rect), strip.ok ? 0x22c55e : 0xf59e0b, strip.ok ? 0.14 : 0.35, 0.003));
       }
       if (st.error || show) {
@@ -741,7 +741,7 @@ export function createScene(container, store) {
       const st = a.beds[bed.id];
       const showB = sel && sel.kind === 'bed' && sel.id === bed.id;
       for (const strip of st.strips) {
-        if (!showB && strip.ok) continue;
+        if (!showB && (strip.ok || strip.hidden)) continue;
         overlayGroup.add(floorPoly(rectPts(strip.rect), strip.ok ? 0x22c55e : 0xf59e0b, strip.ok ? 0.16 : 0.35, 0.003));
       }
       const r = bedRect(bed);
