@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Lay out a bedroom in 2D and preview it in 3D." />
+    <title>Bedroom Planner</title>
+  </head>
+  <body data-view="2d">
+    <header class="topbar">
+      <div class="brand">Bedroom planner</div>
+      <div class="toggle" role="group" aria-label="View">
+        <button data-view="2d" aria-pressed="true">2D plan</button>
+        <button data-view="3d" aria-pressed="false">3D view</button>
+      </div>
+      <div class="actions">
+        <button id="undo" title="Undo (Ctrl+Z)" disabled>Undo</button>
+        <button id="redo" title="Redo (Ctrl+Shift+Z)" disabled>Redo</button>
+        <span class="sep"></span>
+        <button id="new" title="Start an empty room">New</button>
+        <button id="import" title="Open a saved plan file">Import</button>
+        <button id="export" title="Save this plan as a file">Export</button>
+        <input id="import-file" type="file" accept="application/json,.json" hidden />
+      </div>
+    </header>
+    <main>
+      <aside id="panel" class="panel" aria-label="Room settings"></aside>
+      <div class="stage">
+        <canvas id="plan" aria-label="Floor plan"></canvas>
+        <div id="three"></div>
+        <div class="view-buttons" id="view-buttons">
+          <button id="cam-overview" title="See the whole room from above">Overview</button>
+          <button id="cam-eye" title="Stand in the room at eye height">Eye level</button>
+        </div>
+        <div class="stage-foot">
+          <span id="hint"></span>
+          <span id="saved"></span>
+        </div>
+        <div id="toast" role="status" hidden></div>
+      </div>
+    </main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
