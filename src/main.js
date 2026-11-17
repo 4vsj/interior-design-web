@@ -5,24 +5,38 @@ import {
 } from './state.js';
 import { GRID } from './geometry.js';
 import { createPlanView } from './view2d.js';
-import { createScene } from './view3d.js';
 
 const $ = (s) => document.querySelector(s);
 
 const plan = createPlanView($('#plan'), store);
 const panel = createPanel($('#panel'));
+// The 3D engine is most of the download, so it loads the first time the 3D view opens.
 let scene = null;
-function getScene() {
-  if (!scene) {
-    try {
-      scene = createScene($('#three'), store);
-    } catch (err) {
-      console.error(err);
-      store.flash('3D view needs WebGL, which this browser has turned off.');
-    }
+let loading = null;
+function loadScene() {
+  if (scene) return Promise.resolve(scene);
+  if (!loading) {
+    document.body.classList.add('loading-3d');
+    loading = import('./view3d.js')
+      .then(({ createScene }) => {
+        scene = createScene($('#three'), store);
+        window.__planner.scene = scene;
+        return scene;
+      })
+      .catch((err) => {
+        console.error(err);
+        store.flash('The 3D view could not start. It needs WebGL, which this browser may have turned off.');
+        return null;
+      })
+      .finally(() => {
+        document.body.classList.remove('loading-3d');
+        loading = null;
+      });
   }
-  return scene;
+  return loading;
 }
+// warm the cache once the page is idle so the first switch feels instant
+(window.requestIdleCallback || ((f) => setTimeout(f, 1500)))(() => import('./view3d.js').catch(() => {}));
 
 const hint = $('#hint');
 const HINTS = {
@@ -35,9 +49,14 @@ function setView(v) {
   document.body.dataset.view = v;
   for (const b of document.querySelectorAll('button[data-view]')) b.setAttribute('aria-pressed', String(b.dataset.view === v));
   hint.textContent = HINTS[v];
-  const s = v === '3d' ? getScene() : scene;
-  if (s) s.setActive(v === '3d');
-  if (v === '2d') plan.draw();
+  if (v === '3d') {
+    loadScene().then((s) => {
+      if (s && store.view === '3d') s.setActive(true);
+    });
+  } else {
+    if (scene) scene.setActive(false);
+    plan.draw();
+  }
 }
 
 let toastTimer = null;
@@ -129,4 +148,4 @@ setView('2d');
 store.emit();
 
 // exposed for automated checks
-window.__planner = { store, get scene() { return scene; } };
+window.__planner = { store, scene };

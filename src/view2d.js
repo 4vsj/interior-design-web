@@ -32,14 +32,14 @@ export function deskPartAt(setup, p) {
 }
 
 const C = {
-  bg: '#eef0f2',
+  bg: '#edf0f4',
   floor: '#fbfaf7',
   gridMinor: 'rgba(30,40,60,0.05)',
   gridMajor: 'rgba(30,40,60,0.13)',
   wall: '#3b3f46',
   text: '#2b2f36',
   muted: '#6b7280',
-  accent: '#2563eb',
+  accent: '#3358e0',
   error: '#dc2626',
   frame: '#c9a27c',
   frameDark: '#8b6a4c',
@@ -148,9 +148,9 @@ export function createPlanView(canvas, store) {
     const R = (x0, y0, x1, y1) => [x0 * s, y0 * s, (x1 - x0) * s, (y1 - y0) * s];
     const hw = w / 2;
     const hl = l / 2;
-    // frame
+    // frame, with a soft drop shadow so furniture sits above the floor
     ctx.fillStyle = bed.frame === 'panel' || bed.frame === 'storage' ? '#b9b2a6' : C.frame;
-    ctx.fillRect(...R(-hw, -hl, hw, hl));
+    softShadow(() => ctx.fillRect(...R(-hw, -hl, hw, hl)));
     // headboard
     ctx.fillStyle = bed.frame === 'panel' ? '#7d808a' : C.frameDark;
     ctx.fillRect(...R(-hw, -hl, hw, -hl + f.head));
@@ -310,6 +310,15 @@ export function createPlanView(canvas, store) {
     }
   }
 
+  function softShadow(fn) {
+    ctx.save();
+    ctx.shadowColor = 'rgba(20, 28, 45, 0.22)';
+    ctx.shadowBlur = Math.max(6, s * 0.08);
+    ctx.shadowOffsetY = Math.max(2, s * 0.02);
+    fn();
+    ctx.restore();
+  }
+
   function drawDesk(d, setup, st, sel) {
     const L = deskLayout(setup);
     const part = sel && sel.kind === 'desk' && sel.id === setup.id ? sel.part || 'setup' : null;
@@ -339,7 +348,7 @@ export function createPlanView(canvas, store) {
       ctx.fillRect(...R(L.pc));
     }
     ctx.fillStyle = finish2D(setup);
-    for (const r of L.solids) ctx.fillRect(...R(r));
+    softShadow(() => { for (const r of L.solids) ctx.fillRect(...R(r)); });
     ctx.strokeStyle = st.error ? C.error : 'rgba(0,0,0,0.5)';
     ctx.lineWidth = st.error ? 2.5 : 1.25;
     for (const r of L.solids) ctx.strokeRect(...R(r));
