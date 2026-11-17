@@ -1,10 +1,14 @@
 // 3D orbit preview. Plan x maps to world X, plan y maps to world Z, Y is up.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
-import { buildBed3D } from './beds.js';
-import { buildSetup3D } from './desks.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { floorTexture, wallTexture } from './textures.js';
+import { buildBed3D, buildSetup3D } from './models3d.js';
 import { bedRect, deskSolids, doorSwing, snapBed, WALL_T, WALLS, wallInfo } from './geometry.js';
 import { stripSegments, TEMP_COLOR } from './lighting.js';
 
@@ -45,8 +49,12 @@ function floorPoly(points, color, opacity, y) {
 const rectPts = (r) => [{ x: r.x0, y: r.y0 }, { x: r.x1, y: r.y0 }, { x: r.x1, y: r.y1 }, { x: r.x0, y: r.y1 }];
 
 export function createScene(container, store) {
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  // filmic-but-neutral tone mapping keeps furniture colours true while taming bright lights
+  renderer.toneMapping = THREE.NeutralToneMapping;
+  renderer.toneMappingExposure = 1.0;
+  renderer.setClearColor(0x000000, 0);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   // shadows only change when the scene does, not when the camera orbits
@@ -54,7 +62,12 @@ export function createScene(container, store) {
   container.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xeef0f2);
+  // the sky gradient is CSS behind a transparent canvas, so it costs nothing to draw
+  scene.background = null;
+  // soft studio reflections for every material, baked once
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  pmrem.dispose();
   const camera = new THREE.PerspectiveCamera(55, 1, 0.05, 200);
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
@@ -67,7 +80,7 @@ export function createScene(container, store) {
   controls.minDistance = 0.15;
   controls.maxDistance = 40;
 
-  const hemi = new THREE.HemisphereLight(0xffffff, 0xb7ad9f, 1.9);
+  const hemi = new THREE.HemisphereLight(0xffffff, 0xb7ad9f, 1.1);
   scene.add(hemi);
   // daylight; shadows come from the ceiling lights only, which keeps laptops fast
   const sun = new THREE.DirectionalLight(0xffffff, 1.7);
@@ -89,12 +102,41 @@ export function createScene(container, store) {
   const lightsGroup = new THREE.Group();
   scene.add(roomGroup, bedsGroup, overlayGroup, desksGroup, lightsGroup);
 
-  const wallMatBase = new THREE.MeshStandardMaterial({ color: 0xf2efe9, roughness: 0.9 });
+  const wallMatBase = new THREE.MeshStandardMaterial({ color: 0xffffff, map: wallTexture(THREE), roughness: 0.92 });
+  const skirtMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.45 });
   const trimMatBase = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6 });
   const doorMatBase = new THREE.MeshStandardMaterial({ color: 0xd8cbb8, roughness: 0.7 });
   const glassMatBase = new THREE.MeshStandardMaterial({ color: 0xbfdcf2, roughness: 0.1, transparent: true, opacity: 0.35 });
-  const floorMat = new THREE.MeshStandardMaterial({ color: 0xe3d3b8, roughness: 0.75 });
+  const floorTex = floorTexture(THREE, renderer);
+  const floorMat = new THREE.MeshStandardMaterial({ color: 0xffffff, map: floorTex, roughness: 0.55 });
   const stubMat = new THREE.MeshStandardMaterial({ color: 0x9aa0a8, roughness: 0.9 });
+
+  // glow for lamps, LEDs and RGB at night; daytime renders straight to screen
+  const composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.55, 0.5, 0.82);
+  composer.addPass(bloom);
+  composer.addPass(new OutputPass());
+  let bloomOn = false;
+  const nightSky = new THREE.Color(0x0b0e16);
+
+  // eased camera moves for the Overview and Eye level buttons
+  let tween = null;
+  function flyTo(pos, target, ms = 750) {
+    tween = {
+      p0: camera.position.clone(), t0: controls.target.clone(), p1: pos, t1: target, start: performance.now(), ms,
+    };
+    dirty = true;
+  }
+  function stepTween(now) {
+    if (!tween) return false;
+    const k = Math.min(1, (now - tween.start) / tween.ms);
+    const e = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+    camera.position.lerpVectors(tween.p0, tween.p1, e);
+    controls.target.lerpVectors(tween.t0, tween.t1, e);
+    if (k >= 1) tween = null;
+    return true;
+  }
 
   let walls = []; // { group, stub, normal: Vector3, center: Vector3 }
   const STUB_H = 0.12; // cutaway height for walls between the camera and the room
@@ -112,6 +154,7 @@ export function createScene(container, store) {
     const { width: W, length: L, height: H } = d.room;
     const T = WALL_T;
 
+    floorTex.repeat.set(W / floorTex.userData.tile, L / floorTex.userData.tile);
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(W, L), floorMat);
     floor.rotation.x = -Math.PI / 2;
     floor.position.set(W / 2, 0, L / 2);
@@ -149,6 +192,14 @@ export function createScene(container, store) {
         return mesh;
       };
 
+      // skirting board on the room side, clipped to the room's own length
+      const skirt = (a, b) => {
+        const lo = Math.max(a, 0);
+        const hi = Math.min(b, info.len);
+        if (hi - lo < 0.02) return;
+        const m = piece(skirtMat, lo, hi, 0, 0.08, 0.016, T / 2 + 0.008);
+        if (m) m.castShadow = false;
+      };
       const ops = d.openings.filter((o) => o.wall === wall).sort((p, q) => p.pos - q.pos);
       let cur = a0;
       let stubCur = a0;
@@ -159,6 +210,8 @@ export function createScene(container, store) {
           stubCur = op.pos + op.width;
         }
         piece(wallMat, cur, op.pos, 0, H);
+        skirt(cur, op.pos);
+        if (op.sill > 0.1) skirt(op.pos, op.pos + op.width);
         const top = op.sill + op.height;
         piece(wallMat, op.pos, op.pos + op.width, 0, op.sill);
         piece(wallMat, op.pos, op.pos + op.width, top, H);
@@ -193,6 +246,7 @@ export function createScene(container, store) {
         cur = op.pos + op.width;
       }
       piece(wallMat, cur, a1, 0, H);
+      skirt(cur, a1);
       piece(stubMat, stubCur, a1, 0, STUB_H, T, 0, stub);
       stub.visible = false;
 
@@ -222,7 +276,7 @@ export function createScene(container, store) {
           disposeTree(rec.group);
           desksGroup.remove(rec.group);
         }
-        const group = buildSetup3D(THREE, RoundedBoxGeometry, k);
+        const group = buildSetup3D(k);
         group.traverse((o) => { o.userData.deskId = k.id; });
         desksGroup.add(group);
         rec = { key, group };
@@ -242,11 +296,15 @@ export function createScene(container, store) {
 
   function applyMode(d) {
     const night = d.lighting.mode === 'night';
-    hemi.intensity = night ? 0.06 : 1.9;
+    hemi.intensity = night ? 0.05 : 1.1;
     hemi.color.set(night ? 0x8a9bc4 : 0xffffff);
     sun.visible = !night;
-    scene.background.set(night ? 0x0f1117 : 0xeef0f2);
-    groundMat.color.set(night ? 0x1a1c22 : 0xe2e4e7);
+    scene.environmentIntensity = night ? 0.03 : 0.55;
+    groundMat.color.set(night ? 0x14161c : 0xdfe3e8);
+    bloomOn = night;
+    // the bloom pass draws an opaque frame, so night gets a real background colour
+    scene.background = night ? nightSky : null;
+    container.classList.toggle('night', night);
   }
 
   function emissiveMat(color, intensity) {
@@ -364,14 +422,11 @@ export function createScene(container, store) {
       const mid = door.pos + door.width / 2;
       p = { x: w.start.x + w.u.x * mid + w.n.x * 0.35, y: w.start.y + w.u.y * mid + w.n.y * 0.35 };
     }
-    camera.position.set(p.x, 1.6, p.y);
     const dir = new THREE.Vector3(W / 2 - p.x, 0, L / 2 - p.y).normalize();
-    controls.target.set(p.x + dir.x * 1.2, 1.35, p.y + dir.z * 1.2);
-    controls.update();
-    dirty = true;
+    flyTo(new THREE.Vector3(p.x, 1.6, p.y), new THREE.Vector3(p.x + dir.x * 1.2, 1.35, p.y + dir.z * 1.2));
   }
 
-  function frameCamera(d) {
+  function frameCamera(d, animate = false) {
     const { width: W, length: L } = d.room;
     const R = Math.max(W, L);
     const heads = { 0: 'top', 90: 'right', 180: 'bottom', 270: 'left' };
@@ -384,8 +439,15 @@ export function createScene(container, store) {
       const v = score(sx > 0 ? 'left' : 'right') + score(sz > 0 ? 'top' : 'bottom');
       if (v > best.v) best = { sx, sz, v };
     }
-    controls.target.set(W / 2, 0.5, L / 2);
-    camera.position.set(W / 2 + best.sx * R * 0.75, R * 1.15, L / 2 + best.sz * R * 1.25);
+    const target = new THREE.Vector3(W / 2, 0.5, L / 2);
+    const pos = new THREE.Vector3(W / 2 + best.sx * R * 0.75, R * 1.15, L / 2 + best.sz * R * 1.25);
+    if (animate) {
+      flyTo(pos, target);
+      return;
+    }
+    tween = null;
+    controls.target.copy(target);
+    camera.position.copy(pos);
     controls.update();
     dirty = true;
   }
@@ -472,7 +534,7 @@ export function createScene(container, store) {
           disposeTree(rec.group);
           bedsGroup.remove(rec.group);
         }
-        const group = buildBed3D(THREE, RoundedBoxGeometry, bed, d.room.height);
+        const group = buildBed3D(bed, d.room.height);
         group.traverse((o) => { o.userData.bedId = bed.id; });
         bedsGroup.add(group);
         rec = { key, group };
@@ -497,7 +559,9 @@ export function createScene(container, store) {
     const selD = store.selected;
     for (const k of d.desks) {
       const st = store.analysis.items[k.id];
+      const showK = selD && selD.kind === 'desk' && selD.id === k.id;
       for (const strip of st.strips) {
+        if (!showK && strip.ok) continue; // keep the 3D floor clean: zones show when selected or blocked
         overlayGroup.add(floorPoly(rectPts(strip.rect), strip.ok ? 0x22c55e : 0xf59e0b, strip.ok ? 0.14 : 0.35, 0.003));
       }
       const isSel = selD && selD.kind === 'desk' && selD.id === k.id;
@@ -523,7 +587,9 @@ export function createScene(container, store) {
     const sel = store.selected;
     for (const bed of d.beds) {
       const st = a.beds[bed.id];
+      const showB = sel && sel.kind === 'bed' && sel.id === bed.id;
       for (const strip of st.strips) {
+        if (!showB && strip.ok) continue;
         overlayGroup.add(floorPoly(rectPts(strip.rect), strip.ok ? 0x22c55e : 0xf59e0b, strip.ok ? 0.16 : 0.35, 0.003));
       }
       const r = bedRect(bed);
@@ -583,6 +649,9 @@ export function createScene(container, store) {
     const r = container.getBoundingClientRect();
     if (!r.width || !r.height) return;
     renderer.setSize(r.width, r.height, false);
+    composer.setSize(r.width, r.height);
+    // bloom works at half resolution; it's a blur, so nobody can tell
+    bloom.resolution.set(r.width / 2, r.height / 2);
     camera.aspect = r.width / r.height;
     camera.updateProjectionMatrix();
     dirty = true;
@@ -596,7 +665,11 @@ export function createScene(container, store) {
     if (!active) return;
     const dt = Math.min(0.05, ((now || 0) - lastT) / 1000 || 0.016);
     lastT = now || 0;
-    if (fly(dt)) dirty = true;
+    if (fly(dt)) {
+      tween = null;
+      dirty = true;
+    }
+    if (stepTween(now || performance.now())) dirty = true;
     if (controls.update()) dirty = true;
     updateWallFade();
     if (cycling.length) {
@@ -613,7 +686,8 @@ export function createScene(container, store) {
       dirty = true;
     }
     if (dirty) {
-      renderer.render(scene, camera);
+      if (bloomOn) composer.render();
+      else renderer.render(scene, camera);
       dirty = false;
     }
     requestAnimationFrame(loop);
@@ -645,6 +719,7 @@ export function createScene(container, store) {
   }
 
   container.addEventListener('pointerdown', (e) => {
+    tween = null; // grabbing the view takes over from a camera move
     if (e.button !== 0) return;
     setRay(e);
     const hit = itemUnder();
@@ -705,7 +780,7 @@ export function createScene(container, store) {
     camera,
     controls,
     overview() {
-      frameCamera(store.design);
+      frameCamera(store.design, true);
     },
     eyeLevel() {
       eyeLevel(store.design);

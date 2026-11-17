@@ -33,9 +33,11 @@ Ctrl/Cmd+Z undo, Ctrl/Cmd+Shift+Z or Ctrl+Y redo, Delete removes the selection, 
 
 - `src/state.js` design model, validation, undo history, persistence, actions
 - `src/geometry.js` wall maths, opening fitting, door swings, snapping, collision and walkway checks
-- `src/beds.js` mattress sizes, frame dimensions, 3D bed builders
-- `src/desks.js` desk setup catalogue, piece layout, 3D desk, chair and PC builders
+- `src/beds.js` mattress sizes and frame dimensions
+- `src/desks.js` desk setup catalogue and piece layout
+- `src/models3d.js` 3D bed, desk, chair and PC builders (loaded with the 3D view)
+- `src/textures.js` procedural floor and wall textures
 - `src/lighting.js` light colours and LED strip paths
 - `src/view2d.js` canvas plan editor
-- `src/view3d.js` Three.js scene and floor dragging
+- `src/view3d.js` Three.js scene, camera, bloom and floor dragging (lazy-loaded on first switch to 3D)
 - `src/panel.js` side panel
