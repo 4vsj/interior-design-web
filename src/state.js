@@ -1,11 +1,11 @@
 // Design model, undo/redo history and localStorage persistence.
 import { FRAMES, MATTRESS, SIZE_KEYS } from './beds.js';
 import {
-  CASES, CHAIRS, COOLERS, DESK_LIMITS, defaultSetup, FINISHES, GPUS, KEYBOARDS, MONITORS,
+  CASES, CHAIRS, COMPUTER, COOLERS, DESK_LIMITS, defaultSetup, FINISHES, GPUS, KEYBOARDS, MONITORS,
 } from './desks.js';
 import { CLOSET_FINISHES, CLOSET_LIMITS, CLOSET_STYLES, defaultCloset } from './closets.js';
 import {
-  clampEnsuite, CORNERS, defaultEnsuite, ENS_DOORS, WET,
+  clampEnsuite, CORNERS, defaultEnsuite, defaultWalkin, ENS_DOORS, STORAGE, WET,
 } from './ensuite.js';
 import {
   analyze, clamp, fitOpening, headAgainst, HEAD_ROT, snapBed, WALLS, wallInfo,
@@ -48,6 +48,7 @@ export function defaultDesign() {
     desks: [],
     closets: [],
     ensuite: null,
+    walkin: null,
     lighting: { mode: 'day', lights: [], strips: [] },
   };
 }
@@ -78,6 +79,23 @@ export function normalizeEnsuite(raw, room) {
   e.wet = pick(raw.wet, WET, e.wet);
   e.toilet = raw.toilet !== false;
   e.vanity = raw.vanity !== false;
+  return clampEnsuite(room, e);
+}
+
+export function normalizeWalkin(raw, room) {
+  if (!raw || typeof raw !== 'object') return null;
+  const e = defaultWalkin(room);
+  e.corner = pick(raw.corner, CORNERS, e.corner);
+  e.width = num(raw.width, e.width);
+  e.length = num(raw.length, e.length);
+  e.doorSide = raw.doorSide === 'h' ? 'h' : 'v';
+  e.doorWidth = num(raw.doorWidth, e.doorWidth);
+  e.doorAt = num(raw.doorAt, e.doorAt);
+  e.door = pick(raw.door, ENS_DOORS, e.door);
+  e.storage = pick(raw.storage, STORAGE, e.storage);
+  e.finish = pick(raw.finish, CLOSET_FINISHES, e.finish);
+  e.mirror = raw.mirror !== false;
+  e.bench = raw.bench !== false;
   return clampEnsuite(room, e);
 }
 
@@ -120,6 +138,7 @@ export function normalizeSetup(raw, id, room) {
   s.pc.cooler = pick(pc.cooler, COOLERS, s.pc.cooler);
   s.pc.rgb = pc.rgb !== false;
   s.pc.rgbColor = hex(pc.rgbColor, s.pc.rgbColor);
+  s.computer = pick(raw.computer, COMPUTER, 'full');
   s.rot = ROTS.includes(raw.rot) ? raw.rot : 0;
   s.x = clamp(num(raw.x, room.width / 2), 0, room.width);
   s.y = clamp(num(raw.y, room.length / 2), 0, room.length);
@@ -181,6 +200,7 @@ export function normalize(raw) {
     d.closets.push(normalizeCloset(c, keepId(c.id, 'c', seen), d.room));
   }
   d.ensuite = normalizeEnsuite(raw.ensuite, d.room);
+  d.walkin = normalizeWalkin(raw.walkin, d.room);
 
   const lt = raw.lighting || {};
   d.lighting.mode = lt.mode === 'night' ? 'night' : 'day';
@@ -228,7 +248,7 @@ export function stripTargets(d) {
   d.beds.forEach((b, i) => out.push([`bed:${b.id}`, `Bed ${i + 1} frame`]));
   d.desks.forEach((k, i) => {
     out.push([`desk:${k.id}`, `Desk setup ${i + 1}, desk underside`]);
-    out.push([`monitor:${k.id}`, `Desk setup ${i + 1}, back of monitor`]);
+    if (k.computer !== 'none') out.push([`monitor:${k.id}`, `Desk setup ${i + 1}, back of monitor`]);
   });
   return out;
 }
@@ -255,6 +275,7 @@ export function exportable(design) {
     desks: design.desks,
     closets: design.closets,
     ensuite: design.ensuite,
+    walkin: design.walkin,
     lighting: design.lighting,
   };
 }
@@ -284,6 +305,7 @@ export const store = {
   design: load(),
   selected: null, // { kind: 'bed' | 'opening' | 'desk' | 'closet' | 'ensuite' | 'light' | 'strip', id, part? }
   view: '2d',
+  viewOnly: false, // look around without being able to select or move anything
   saved: true,
   past: [],
   future: [],
@@ -384,6 +406,7 @@ export function listFor(d, kind) {
   if (kind === 'desk') return d.desks;
   if (kind === 'closet') return d.closets;
   if (kind === 'ensuite') return d.ensuite ? [d.ensuite] : [];
+  if (kind === 'walkin') return d.walkin ? [d.walkin] : [];
   if (kind === 'light') return d.lighting.lights;
   if (kind === 'strip') return d.lighting.strips;
   return [];
@@ -476,22 +499,25 @@ export function addCloset() {
   store.select({ kind: 'closet', id });
 }
 
-export function addEnsuite() {
+/** Add the ensuite or the walk-in closet in the corner that clashes with the least. */
+function addZone(kind, make) {
   store.commit((d) => {
-    if (d.ensuite) return false;
-    // pick the corner that clashes with the least furniture
+    if (d[kind]) return false;
     let best = null;
     for (const corner of Object.keys(CORNERS)) {
-      const e = defaultEnsuite(d.room);
+      const e = make(d.room);
       e.corner = corner;
-      const a = analyze({ ...d, ensuite: e });
+      const a = analyze({ ...d, [kind]: e });
       const n = a.issues.filter((i) => i.level === 'error').length * 10 + a.issues.length;
       if (!best || n < best.n) best = { e, n };
     }
-    d.ensuite = best.e;
+    d[kind] = best.e;
   });
-  store.select({ kind: 'ensuite', id: 'ensuite' });
+  store.select({ kind, id: kind });
 }
+
+export const addEnsuite = () => addZone('ensuite', defaultEnsuite);
+export const addWalkin = () => addZone('walkin', defaultWalkin);
 
 export function addLight() {
   const id = uid('l');
@@ -530,6 +556,7 @@ export function deleteSelected() {
     else if (s.kind === 'desk') d.desks = d.desks.filter((k) => k.id !== s.id);
     else if (s.kind === 'closet') d.closets = d.closets.filter((c) => c.id !== s.id);
     else if (s.kind === 'ensuite') d.ensuite = null;
+    else if (s.kind === 'walkin') d.walkin = null;
     else if (s.kind === 'light') d.lighting.lights = d.lighting.lights.filter((l) => l.id !== s.id);
     else if (s.kind === 'strip') d.lighting.strips = d.lighting.strips.filter((t) => t.id !== s.id);
     // strips go with the bed or desk they were stuck to
@@ -540,7 +567,7 @@ export function deleteSelected() {
 export function duplicateSelected() {
   const s = store.selected;
   if (!s) return;
-  if (s.kind === 'ensuite') return;
+  if (s.kind === 'ensuite' || s.kind === 'walkin') return;
   if (s.kind === 'bed' || s.kind === 'desk' || s.kind === 'closet' || s.kind === 'light') {
     const id = uid({ bed: 'b', desk: 'k', closet: 'c', light: 'l' }[s.kind]);
     store.commit((d) => {
@@ -602,7 +629,7 @@ export function rotateSelected() {
 
 export function nudgeSelected(dx, dy) {
   const s = store.selected;
-  if (!s || s.kind === 'strip' || s.kind === 'ensuite') return;
+  if (!s || s.kind === 'strip' || s.kind === 'ensuite' || s.kind === 'walkin') return;
   store.commit((d) => {
     const item = listFor(d, s.kind).find((x) => x.id === s.id);
     if (MOVABLE.includes(s.kind)) {

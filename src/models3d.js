@@ -211,25 +211,29 @@ export function buildSetup3D(s) {
 
   // ----- keyboard -----
   const k = L.keyboard;
-  rect(g, Mt.plastic, k, H, 0.018, 'keyboard');
-  rect(g, Mt.keycap, { x0: k.x0 + 0.008, y0: k.y0 + 0.008, x1: k.x1 - 0.008, y1: k.y1 - 0.008 }, H + 0.018, 0.01, 'keyboard');
-  if (s.keyboard.rgb) {
-    rect(g, kbRgb, { x0: k.x0 - 0.004, y0: k.y0 - 0.004, x1: k.x1 + 0.004, y1: k.y1 + 0.004 }, H, 0.004, 'keyboard');
+  if (k) {
+    rect(g, Mt.plastic, k, H, 0.018, 'keyboard');
+    rect(g, Mt.keycap, { x0: k.x0 + 0.008, y0: k.y0 + 0.008, x1: k.x1 - 0.008, y1: k.y1 - 0.008 }, H + 0.018, 0.01, 'keyboard');
+    if (s.keyboard.rgb) {
+      rect(g, kbRgb, { x0: k.x0 - 0.004, y0: k.y0 - 0.004, x1: k.x1 + 0.004, y1: k.y1 + 0.004 }, H, 0.004, 'keyboard');
+    }
+    // mouse
+    box(g, Mt.plastic, 0.065, 0.035, 0.11, k.x1 + 0.12, H, (k.y0 + k.y1) / 2, 'keyboard');
   }
-  // mouse
-  box(g, Mt.plastic, 0.065, 0.035, 0.11, k.x1 + 0.12, H, (k.y0 + k.y1) / 2, 'keyboard');
 
   // ----- chair -----
   g.add(buildChair(s, L, tag));
 
   // ----- PC -----
-  const pcG = buildPC(s, Mt, rgbOn ? rgb : Mt.rgbOff, own, tag);
   const pr = L.pc;
   const c = CASES[s.pc.style];
   const y0 = s.pc.place === 'desk' ? H : 0.01;
-  pcG.position.set((pr.x0 + pr.x1) / 2, y0, (pr.y0 + pr.y1) / 2);
-  g.add(pcG);
-  if (rgbOn) {
+  if (pr) {
+    const pcG = buildPC(s, Mt, rgbOn ? rgb : Mt.rgbOff, own, tag);
+    pcG.position.set((pr.x0 + pr.x1) / 2, y0, (pr.y0 + pr.y1) / 2);
+    g.add(pcG);
+  }
+  if (pr && rgbOn) {
     const glow = new THREE.PointLight(s.pc.rgbColor, 0.35, 1.4, 2);
     glow.position.set((pr.x0 + pr.x1) / 2 - c.w / 2 - 0.02, y0 + c.h * 0.55, (pr.y0 + pr.y1) / 2);
     g.add(glow);
@@ -543,6 +547,77 @@ export function buildFixture3D(f) {
   };
   const hw = f.w / 2;
   const hl = f.l / 2;
+  const own = (color, roughness = 0.6, metalness = 0) => {
+    const m = new THREE.MeshStandardMaterial({ color, roughness, metalness });
+    m.userData.own = true;
+    return m;
+  };
+  if (f.type === 'rail' || f.type === 'shelves' || f.type === 'bench' || f.type === 'mirror') {
+    const body = own(CLOSET_COLOR[f.finish] || CLOSET_COLOR.white);
+    if (f.type === 'rail') {
+      // shelf above a hanging rail full of clothes, open to the room
+      const metal = own(0xb8bcc2, 0.3, 0.8);
+      box(body, f.w, 0.022, f.l, 0, 1.85, 0);
+      for (const sx of [-1, 1]) box(body, 0.022, 0.3, f.l, sx * (hw - 0.011), 1.55, 0);
+      const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, f.w - 0.04, 10), metal);
+      rail.rotation.z = Math.PI / 2;
+      rail.position.set(0, 1.76, 0);
+      g.add(rail);
+      const tones = [0x3d4a5c, 0x8a6f5a, 0xc9c2b4, 0x5f7466, 0x2e2f33, 0xa9b6c8, 0x7b5560, 0xd9d2c5];
+      let x = -hw + 0.06;
+      let i = 0;
+      while (x < hw - 0.06) {
+        const cw = 0.03 + ((i * 37) % 5) * 0.008;
+        const len = 0.7 + ((i * 53) % 5) * 0.14;
+        box(own(tones[i % tones.length], 0.95), cw, len, f.l - 0.12, x + cw / 2, 1.72 - len, 0);
+        x += cw + 0.014;
+        i++;
+      }
+      // folded jumpers and boxes on the shelf
+      for (let k = 0; k < Math.floor((f.w - 0.1) / 0.4); k++) {
+        box(own(tones[(k * 3) % tones.length], 0.95), 0.3, 0.14, f.l - 0.2, -hw + 0.24 + k * 0.4, 1.872, 0);
+      }
+    } else if (f.type === 'shelves') {
+      const H = 2.1;
+      box(body, f.w, 0.07, f.l - 0.03, 0, 0, 0.015);
+      for (const sx of [-1, 1]) box(body, 0.02, H, f.l, sx * (hw - 0.01), 0, 0);
+      box(body, f.w, 0.02, f.l, 0, H - 0.02, 0);
+      box(own(0xe2ddd4, 0.8), f.w - 0.04, H - 0.07, 0.01, 0, 0.07, -hl + 0.005);
+      // drawers at the bottom, shelves of folded clothes and shoes above
+      for (let k = 0; k < 3; k++) {
+        box(body, f.w - 0.05, 0.2, 0.02, 0, 0.09 + k * 0.22, hl - 0.01);
+        box(own(0xb8bcc2, 0.3, 0.8), Math.min(0.2, f.w * 0.3), 0.015, 0.02, 0, 0.18 + k * 0.22, hl + 0.01);
+      }
+      const tones = [0xc9c2b4, 0x3d4a5c, 0x8a6f5a, 0xe8e4dc, 0x5f7466];
+      for (let k = 0; k < 4; k++) {
+        const y = 0.78 + k * 0.32;
+        box(body, f.w - 0.04, 0.02, f.l - 0.02, 0, y, 0);
+        let x = -hw + 0.06;
+        let i = k;
+        while (x < hw - 0.2) {
+          const pw = 0.26;
+          box(own(tones[i % tones.length], 0.95), pw, 0.1 + (i % 3) * 0.03, f.l - 0.12, x + pw / 2, y + 0.02, 0);
+          x += pw + 0.04;
+          i++;
+        }
+      }
+    } else if (f.type === 'bench') {
+      rbox(own(0xb9a58f, 0.9), f.w, 0.16, f.l, 0.04, 0, 0.3, 0);
+      const leg = own(0x5c4633, 0.6);
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) box(leg, 0.035, 0.3, 0.035, sx * (hw - 0.06), 0, sz * (hl - 0.06));
+    } else {
+      box(body, f.w + 0.04, 1.75, 0.025, 0, 0.2, -hl + 0.0125);
+      box(Mt.mirror, f.w - 0.02, 1.69, 0.008, 0, 0.23, -hl + 0.029);
+    }
+    g.traverse((o) => {
+      if (o.isMesh) {
+        o.castShadow = true;
+        o.receiveShadow = true;
+        if (o.material.userData.own) o.userData.ownMaterial = true;
+      }
+    });
+    return g;
+  }
   if (f.type === 'toilet') {
     rbox(Mt.ceramic, 0.36, 0.38, 0.18, 0.03, 0, 0.42, -hl + 0.09); // cistern
     rbox(Mt.ceramic, 0.22, 0.38, 0.3, 0.06, 0, 0, -hl + 0.3); // pedestal

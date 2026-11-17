@@ -153,7 +153,7 @@ export function createScene(container, store) {
   const desks = new Map(); // id -> { key, group }
   const closets = new Map(); // id -> { key, group }
   let ensuiteKey = '';
-  let ensuiteWalls = null; // { full, stub } groups for the partition walls
+  let ensuiteWalls = []; // [{ full, stub }] partition walls of the ensuite and walk-in closet
   let lightsKey = '';
   let cycling = []; // strips with the slow colour cycle: { base: Color, lights, mats }
   let dirty = true;
@@ -275,22 +275,27 @@ export function createScene(container, store) {
     sun.target.position.set(W / 2, 0, L / 2);
   }
 
-  function buildEnsuite(d) {
+  function buildZones(d) {
     clearGroup(ensuiteGroup);
-    ensuiteWalls = null;
-    const e = d.ensuite;
-    if (!e) return;
+    ensuiteWalls = [];
+    for (const e of [d.ensuite, d.walkin]) if (e) buildZone(d, e);
+  }
+
+  function buildZone(d, e) {
     const H = d.room.height;
     const L = ensuiteLayout(d.room, e);
     const r = L.interior;
     const iw = r.x1 - r.x0;
     const il = r.y1 - r.y0;
-    tileTex.repeat.set(iw / tileTex.userData.tile, il / tileTex.userData.tile);
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(iw, il), tileMat);
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.set((r.x0 + r.x1) / 2, 0.002, (r.y0 + r.y1) / 2);
-    floor.receiveShadow = true;
-    ensuiteGroup.add(floor);
+    if (e.id === 'ensuite') {
+      tileTex.repeat.set(iw / tileTex.userData.tile, il / tileTex.userData.tile);
+      const floor = new THREE.Mesh(new THREE.PlaneGeometry(iw, il), tileMat);
+      floor.rotation.x = -Math.PI / 2;
+      floor.position.set((r.x0 + r.x1) / 2, 0.002, (r.y0 + r.y1) / 2);
+      floor.receiveShadow = true;
+      ensuiteGroup.add(floor);
+    }
+    const wallMat = e.id === 'ensuite' ? bathWallMat : wallMatBase;
 
     const full = new THREE.Group();
     const stub = new THREE.Group();
@@ -303,11 +308,11 @@ export function createScene(container, store) {
       return m;
     };
     for (const q of L.walls) {
-      slab(full, bathWallMat, q, 0, H);
-      slab(stub, bathWallMat, q, 0, ENS_CUT);
+      slab(full, wallMat, q, 0, H);
+      slab(stub, wallMat, q, 0, ENS_CUT);
     }
     const doorH = Math.min(2.04, H - 0.08);
-    slab(full, bathWallMat, L.gap, doorH, H);
+    slab(full, wallMat, L.gap, doorH, H);
     // door frame
     const g = L.gap;
     const f = 0.04;
@@ -338,7 +343,7 @@ export function createScene(container, store) {
     }
     stub.visible = false;
     ensuiteGroup.add(full, stub);
-    ensuiteWalls = { full, stub };
+    ensuiteWalls.push({ full, stub });
 
     for (const fx of L.fixtures) {
       const m = buildFixture3D(fx);
@@ -667,6 +672,7 @@ export function createScene(container, store) {
 
   function syncOverlays(d) {
     clearGroup(overlayGroup);
+    if (store.viewOnly) return; // a clean room to look at
     // overlays ignore lighting, so tone them down at night
     overlayGroup.userData.dim = d.lighting.mode === 'night' ? 0.4 : 1;
     const selD = store.selected;
@@ -711,8 +717,9 @@ export function createScene(container, store) {
           st.error ? 0xdc2626 : 0x2563eb, st.error ? 0.45 : 0.35, 0.005));
       }
     }
-    if (d.ensuite) {
-      const L = ensuiteLayout(d.room, d.ensuite);
+    for (const zone of [d.ensuite, d.walkin]) {
+      if (!zone) continue;
+      const L = ensuiteLayout(d.room, zone);
       if (L.swing) {
         const sw = L.swing;
         const pts = [{ ...sw.hinge }];
@@ -722,8 +729,8 @@ export function createScene(container, store) {
         }
         overlayGroup.add(floorPoly(pts, 0x2563eb, 0.16, 0.004));
       }
-      const err = store.analysis.items.ensuite.error;
-      if (err || (store.selected && store.selected.kind === 'ensuite')) {
+      const err = store.analysis.items[zone.id].error;
+      if (err || (store.selected && store.selected.kind === zone.id)) {
         const r = L.rect;
         overlayGroup.add(floorPoly(rectPts(r), err ? 0xdc2626 : 0x2563eb, 0.2, 0.004));
       }
@@ -761,10 +768,10 @@ export function createScene(container, store) {
       frameKey = fk;
       frameCamera(d);
     }
-    const ek = JSON.stringify([d.room, d.ensuite]);
+    const ek = JSON.stringify([d.room, d.ensuite, d.walkin]);
     if (ek !== ensuiteKey) {
       ensuiteKey = ek;
-      buildEnsuite(d);
+      buildZones(d);
     }
     syncBeds(d);
     syncDesks(d);
@@ -794,16 +801,18 @@ export function createScene(container, store) {
       w.stub.visible = outside;
     }
     // ensuite walls drop to stubs whenever the camera is outside the room, so the bathroom shows from above
-    if (ensuiteWalls) {
+    if (ensuiteWalls.length) {
       const d = store.design;
       const p = camera.position;
       const out = p.x < 0 || p.z < 0 || p.x > d.room.width || p.z > d.room.length || p.y > d.room.height;
-      if (ensuiteWalls.full.visible === out) {
-        renderer.shadowMap.needsUpdate = true;
-        dirty = true;
+      for (const w of ensuiteWalls) {
+        if (w.full.visible === out) {
+          renderer.shadowMap.needsUpdate = true;
+          dirty = true;
+        }
+        w.full.visible = !out;
+        w.stub.visible = out;
       }
-      ensuiteWalls.full.visible = !out;
-      ensuiteWalls.stub.visible = out;
     }
   }
 
@@ -885,7 +894,8 @@ export function createScene(container, store) {
     tween = null; // grabbing the view takes over from a camera move
     if (e.button !== 0) return;
     setRay(e);
-    const hit = itemUnder();
+    // in view-only mode every drag turns the camera
+    const hit = store.viewOnly ? null : itemUnder();
     down = { x: e.clientX, y: e.clientY };
     if (!hit) return; // let the orbit controls handle it
     e.stopPropagation();
@@ -903,7 +913,7 @@ export function createScene(container, store) {
   container.addEventListener('pointermove', (e) => {
     setRay(e);
     if (!drag) {
-      renderer.domElement.style.cursor = itemUnder() ? 'grab' : '';
+      renderer.domElement.style.cursor = !store.viewOnly && itemUnder() ? 'grab' : '';
       return;
     }
     renderer.domElement.style.cursor = 'grabbing';

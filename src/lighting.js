@@ -58,6 +58,7 @@ export function stripSegments(d, strip) {
   // back of the monitor(s): light points at the wall behind the desk
   const mon = MONITORS[s.monitor.size];
   const r = L.monitorRect;
+  if (!r) return []; // no monitor on this desk
   const y = L.top + 0.1;
   return [{
     a: toWorld(s, r.x0 + 0.05, y), b: toWorld(s, r.x1 - 0.05, y),

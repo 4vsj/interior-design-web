@@ -40,6 +40,9 @@ export const GPUS = {
 
 export const COOLERS = { air: 'Air tower', aio: 'AIO liquid with radiator' };
 
+// what sits on the desk: the whole computer, a screen without a PC (say a laptop dock), or nothing
+export const COMPUTER = { full: 'PC, monitor and keyboard', screen: 'Monitor and keyboard, no PC', none: 'Nothing, just the desk' };
+
 export const PARTS = {
   setup: 'Whole setup',
   desk: 'Desk',
@@ -55,6 +58,7 @@ export function defaultSetup(id) {
     x: 0,
     y: 0,
     rot: 0,
+    computer: 'full',
     desk: { shape: 'straight', width: 1.4, depth: 0.7, height: 0.75, finish: 'wood' },
     chair: { style: 'office', color: '#3b4252' },
     monitor: { size: '27', count: 1 },
@@ -96,9 +100,11 @@ export function deskLayout(s) {
     pc = { x0: cx - c.w / 2, y0: cy - c.d / 2, x1: cx + c.w / 2, y1: cy + c.d / 2 };
   }
 
+  const hasPc = s.computer !== 'screen' && s.computer !== 'none';
+  const hasScreen = s.computer !== 'none';
   // free width for monitors and keyboard on the main top
   let workX1 = isL ? W / 2 - D : W / 2;
-  if (!isL && s.pc.place === 'desk') workX1 = pc.x0 - 0.03;
+  if (!isL && hasPc && s.pc.place === 'desk') workX1 = pc.x0 - 0.03;
   const workX0 = -W / 2;
   const cx = (workX0 + workX1) / 2;
 
@@ -107,7 +113,7 @@ export function deskLayout(s) {
   const gap = 0.02;
   const monW = n * m.w + (n - 1) * gap;
   const monitors = [];
-  for (let i = 0; i < n; i++) {
+  for (let i = 0; i < (hasScreen ? n : 0); i++) {
     const mx = cx - monW / 2 + m.w / 2 + i * (m.w + gap);
     monitors.push({ x: mx, y: top + 0.14, w: m.w, h: m.h, angle: n === 2 ? (i === 0 ? 1 : -1) * 0.2 : 0 });
   }
@@ -122,8 +128,9 @@ export function deskLayout(s) {
     x0: cx - monW / 2, y0: top + 0.06, x1: cx + monW / 2, y1: top + 0.22,
   };
   return {
-    main, ret, solids: ret ? [main, ret] : [main], pc, monitors, monitorRect, keyboard, chair, chairZone,
-    top, front, Lr, workX0, workX1, monTooWide: monW > workX1 - workX0 + 0.02,
+    main, ret, solids: ret ? [main, ret] : [main], pc: hasPc ? pc : null, monitors,
+    monitorRect: hasScreen ? monitorRect : null, keyboard: hasScreen ? keyboard : null, chair, chairZone,
+    top, front, Lr, workX0, workX1, monTooWide: hasScreen && monW > workX1 - workX0 + 0.02,
   };
 }
 

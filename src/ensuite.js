@@ -7,7 +7,15 @@ export const CORNERS = { 'top-left': 'Top left', 'top-right': 'Top right', 'bott
 export const WET = { shower: 'Shower', bath: 'Bath', none: 'Neither' };
 export const ENS_DOORS = { in: 'Swings into bathroom', out: 'Swings into bedroom', sliding: 'Sliding' };
 export const ENS_LIMITS = { size: { min: 1.2, max: 4.0 }, door: { min: 0.6, max: 0.9 } };
-export const FIXTURE_NAME = { shower: 'shower', bath: 'bath', toilet: 'toilet', vanity: 'vanity' };
+export const FIXTURE_NAME = {
+  shower: 'shower', bath: 'bath', toilet: 'toilet', vanity: 'vanity', rail: 'hanging rail', shelves: 'shelves', bench: 'bench', mirror: 'mirror',
+};
+// walk-in closet: the same walled-off corner, fitted out for clothes instead
+export const STORAGE = { one: 'Hanging rail on one wall', two: 'Rail plus shelves and drawers' };
+export const ZONE_NAME = { ensuite: 'the ensuite', walkin: 'the walk-in closet' };
+const RAIL_D = 0.6;
+const SHELF_D = 0.45;
+export const STAND = 0.8; // clear floor to stand and get changed
 
 // w across (along the wall), l out from the wall; run is the wall length one takes up
 const FIX = {
@@ -27,6 +35,15 @@ export function defaultEnsuite(room) {
   const e = {
     id: 'ensuite', corner: 'top-right', width: 1.8, length: 2.1,
     doorSide: 'v', doorAt: 99, doorWidth: 0.72, door: 'in', wet: 'shower', toilet: true, vanity: true,
+  };
+  clampEnsuite(room, e);
+  return e;
+}
+
+export function defaultWalkin(room) {
+  const e = {
+    id: 'walkin', corner: 'bottom-left', width: 2.0, length: 2.0,
+    doorSide: 'v', doorAt: 99, doorWidth: 0.72, door: 'in', storage: 'two', mirror: true, bench: true, finish: 'white',
   };
   clampEnsuite(room, e);
   return e;
@@ -121,7 +138,9 @@ export function ensuiteLayout(room, e) {
   const fixtures = [];
   const missing = [];
   const put = (type, rc, back, wl) => {
-    const back2 = back === 'top' ? (top ? 'top' : 'bottom') : (left ? 'left' : 'right');
+    const back2 = {
+      top: top ? 'top' : 'bottom', bottom: top ? 'bottom' : 'top', left: left ? 'left' : 'right', right: left ? 'right' : 'left',
+    }[back];
     const rect = R(rc);
     // flip: the mirror into this corner isn't a rotation, so a lopsided model (the shower) is mirrored too
     fixtures.push({
@@ -130,7 +149,40 @@ export function ensuiteLayout(room, e) {
   };
   let topAt = 0;
   let leftAt = 0;
-  if (e.wet === 'shower') {
+  let clear = null;
+  if (e.id === 'walkin') {
+    // rail along one outer wall, shelving tower along the other, then a bench and a mirror
+    const shelves = e.storage === 'two' && il - RAIL_D >= 0.4;
+    if (il >= RAIL_D + 0.3) put('rail', { x0: 0, y0: 0, x1: iw, y1: RAIL_D }, 'top', { w: iw, l: RAIL_D });
+    else missing.push('rail');
+    if (e.storage === 'two') {
+      if (shelves && iw >= SHELF_D + 0.5) put('shelves', { x0: 0, y0: RAIL_D, x1: SHELF_D, y1: il }, 'left', { w: il - RAIL_D, l: SHELF_D });
+      else missing.push('shelves');
+    }
+    const fx0 = fixtures.some((f) => f.type === 'shelves') ? SHELF_D : 0;
+    const fr = { x0: fx0, y0: RAIL_D, x1: iw, y1: il };
+    clear = R(fr);
+    const fw = fr.x1 - fr.x0;
+    const fh = fr.y1 - fr.y0;
+    if (e.bench) {
+      const bw = Math.min(0.9, fw - 0.5);
+      if (bw >= 0.5 && fh >= 0.4 + STAND) {
+        const cx = (fr.x0 + fr.x1) / 2;
+        const cy = (fr.y0 + fr.y1) / 2;
+        put('bench', { x0: cx - bw / 2, y0: cy - 0.2, x1: cx + bw / 2, y1: cy + 0.2 }, 'bottom', { w: bw, l: 0.4 });
+      } else missing.push('bench');
+    }
+    if (e.mirror) {
+      // on the partition without the door, facing into the closet
+      if (e.doorSide === 'v' && fw >= 0.7) {
+        const cx = (fr.x0 + fr.x1) / 2;
+        put('mirror', { x0: cx - 0.3, y0: il - 0.03, x1: cx + 0.3, y1: il }, 'bottom', { w: 0.6, l: 0.03 });
+      } else if (e.doorSide === 'h' && fh >= 0.7) {
+        const cy = (fr.y0 + fr.y1) / 2;
+        put('mirror', { x0: iw - 0.03, y0: cy - 0.3, x1: iw, y1: cy + 0.3 }, 'right', { w: 0.6, l: 0.03 });
+      } else missing.push('mirror');
+    }
+  } else if (e.wet === 'shower') {
     const f = FIX.shower;
     if (iw >= f.w - 1e-6 && il >= f.l - 1e-6) {
       put('shower', { x0: 0, y0: 0, x1: f.w, y1: f.l }, 'top', f);
@@ -149,7 +201,7 @@ export function ensuiteLayout(room, e) {
       leftAt = f.w;
     } else missing.push('bath');
   }
-  for (const type of ['vanity', 'toilet']) {
+  for (const type of e.id === 'walkin' ? [] : ['vanity', 'toilet']) {
     if (!e[type]) continue;
     const f = FIX[type];
     const topFree = iw - topAt + 1e-6;
@@ -166,6 +218,7 @@ export function ensuiteLayout(room, e) {
     } else missing.push(type);
   }
 
+  if (e.finish) for (const f of fixtures) f.finish = e.finish;
   return {
     rect: R({ x0: 0, y0: 0, x1: w, y1: l }),
     interior: R({ x0: 0, y0: 0, x1: iw, y1: il }),
@@ -175,5 +228,6 @@ export function ensuiteLayout(room, e) {
     swing,
     fixtures,
     missing,
+    clear, // walk-in only: the floor left to stand in
   };
 }

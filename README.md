@@ -27,11 +27,14 @@ npm run build    # static site in dist/, deployable to any static host
 - Lighting: day/night, flush or pendant ceiling lights (cord length, colour temperature, brightness), LED strips on a desk underside, monitor back, bed frame or ceiling edge (on/off, colour, static or slow cycle). Only ceiling lights cast shadows, and shadows are recomputed only when the scene changes.
 - Closets: hinged doors, sliding doors or an open rail with shelves, with width, depth, height and finish. They sit against a wall like beds, and the space in front is checked (60 cm, or a door's width for hinged doors).
 - Ensuite bathroom: walls off one corner with two partition walls and a door that swings into the bathroom, swings into the bedroom or slides. Pick a shower, a bath or neither, plus a toilet and a vanity; fixtures are laid out along the outer walls. Furniture inside it, a door that hits it, or fixtures that don't fit are flagged. In 3D its walls are cut to 1 m when you look from outside the room.
+- Walk-in closet and changing room: walls off another corner with its own door, a hanging rail, optional shelves and drawers, a full-length mirror and a bench. A tip shows when there's less than 80 cm of floor to stand in.
+- Desk setups can leave out the PC, or the whole computer, so a desk can stand on its own.
+- View only mode (V): hides the panel and editing buttons, and nothing can be selected, dragged or changed while you move the camera.
 - Undo, redo, delete, duplicate. Autosaves to localStorage; export and import as JSON.
 
 ## Shortcuts
 
-Ctrl/Cmd+Z undo, Ctrl/Cmd+Shift+Z or Ctrl+Y redo, Delete removes the selection, Ctrl/Cmd+D duplicates, R rotates the selected bed, desk setup or closet, arrow keys nudge by 10 cm, Esc deselects. In 3D: W A S D move, Q and E go down and up, Shift moves faster; drag to look around, right-drag to pan, scroll to zoom. Overview and Eye level buttons reset the camera.
+Ctrl/Cmd+Z undo, Ctrl/Cmd+Shift+Z or Ctrl+Y redo, Delete removes the selection, Ctrl/Cmd+D duplicates, R rotates the selected bed, desk setup or closet, arrow keys nudge by 10 cm, Esc deselects, V switches between Edit and View only. In 3D: W A S D move, Q and E go down and up, Shift moves faster; drag to look around, right-drag to pan, scroll to zoom. Overview and Eye level buttons reset the camera.
 
 ## Code map
 
@@ -40,7 +43,7 @@ Ctrl/Cmd+Z undo, Ctrl/Cmd+Shift+Z or Ctrl+Y redo, Delete removes the selection, 
 - `src/beds.js` mattress sizes and frame dimensions
 - `src/desks.js` desk setup catalogue and piece layout
 - `src/closets.js` closet styles, sizes and the clear zone in front
-- `src/ensuite.js` ensuite rectangle, partition walls, door and fixture layout
+- `src/ensuite.js` walled-off corners (ensuite and walk-in closet): partition walls, door and fixture layout
 - `src/models3d.js` 3D bed, desk, chair, PC, closet and bathroom fixture builders (loaded with the 3D view)
 - `src/textures.js` procedural floor, wall and tile textures
 - `src/lighting.js` light colours and LED strip paths

@@ -191,3 +191,11 @@ body[data-view='3d'] #three.night ~ .stage-foot { color: #9aa3b8; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
+
+/* view-only mode: just the room, no editing controls */
+body.viewing .panel,
+body.viewing #undo,
+body.viewing #redo,
+body.viewing #new,
+body.viewing #import,
+body.viewing .actions .sep { display: none; }

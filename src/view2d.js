@@ -25,9 +25,9 @@ export function deskPartAt(setup, p) {
   const L = deskLayout(setup);
   const q = toLocal(setup, p);
   const inR = (r, pad = 0) => q.x >= r.x0 - pad && q.x <= r.x1 + pad && q.y >= r.y0 - pad && q.y <= r.y1 + pad;
-  if (inR(L.keyboard, 0.02)) return 'keyboard';
-  if (inR(L.monitorRect, 0.02)) return 'monitor';
-  if (inR(L.pc)) return 'pc';
+  if (L.keyboard && inR(L.keyboard, 0.02)) return 'keyboard';
+  if (L.monitorRect && inR(L.monitorRect, 0.02)) return 'monitor';
+  if (L.pc && inR(L.pc)) return 'pc';
   if (inR(L.chair)) return 'chair';
   if (L.solids.some((r) => inR(r))) return 'desk';
   return null;
@@ -344,7 +344,7 @@ export function createPlanView(canvas, store) {
     ctx.fillRect(...R({ x0: c.x0 + 0.06, y0: c.y1 - 0.12, x1: c.x1 - 0.06, y1: c.y1 - 0.04 }));
     outline(c, part === 'chair');
     // floor PC under the desk shows dashed
-    const floorPc = setup.pc.place === 'floor';
+    const floorPc = L.pc && setup.pc.place === 'floor';
     if (floorPc) {
       ctx.fillStyle = setup.pc.color;
       ctx.fillRect(...R(L.pc));
@@ -360,7 +360,7 @@ export function createPlanView(canvas, store) {
       ctx.lineWidth = 1;
       ctx.strokeRect(...R(L.pc));
       ctx.setLineDash([]);
-    } else {
+    } else if (L.pc) {
       ctx.fillStyle = setup.pc.color;
       ctx.fillRect(...R(L.pc));
       if (setup.pc.rgb) {
@@ -368,7 +368,7 @@ export function createPlanView(canvas, store) {
         ctx.fillRect(...R({ x0: L.pc.x0, y0: L.pc.y0 + 0.03, x1: L.pc.x0 + 0.02, y1: L.pc.y1 - 0.03 }));
       }
     }
-    outline(L.pc, part === 'pc');
+    if (L.pc) outline(L.pc, part === 'pc');
     // monitors
     ctx.fillStyle = '#1f2125';
     for (const m of L.monitors) {
@@ -379,17 +379,19 @@ export function createPlanView(canvas, store) {
       ctx.fillRect(-0.11 * s, -0.01 * s, 0.22 * s, 0.09 * s);
       ctx.restore();
     }
-    outline(L.monitorRect, part === 'monitor');
-    // keyboard
-    ctx.fillStyle = setup.keyboard.rgb ? setup.pc.rgbColor : '#55585f';
-    ctx.fillRect(...R(L.keyboard));
-    ctx.fillStyle = '#2a2c31';
     const k = L.keyboard;
-    ctx.fillRect(...R({ x0: k.x0 + 0.008, y0: k.y0 + 0.008, x1: k.x1 - 0.008, y1: k.y1 - 0.008 }));
-    ctx.strokeStyle = 'rgba(255,255,255,0.55)';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(...R(k));
-    outline(k, part === 'keyboard');
+    if (k) {
+      outline(L.monitorRect, part === 'monitor');
+      // keyboard
+      ctx.fillStyle = setup.keyboard.rgb ? setup.pc.rgbColor : '#55585f';
+      ctx.fillRect(...R(k));
+      ctx.fillStyle = '#2a2c31';
+      ctx.fillRect(...R({ x0: k.x0 + 0.008, y0: k.y0 + 0.008, x1: k.x1 - 0.008, y1: k.y1 - 0.008 }));
+      ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(...R(k));
+      outline(k, part === 'keyboard');
+    }
     for (const r of L.solids) outline(r, part === 'desk' || part === 'setup');
     if (st.error) {
       ctx.fillStyle = 'rgba(220,38,38,0.10)';
@@ -490,7 +492,40 @@ export function createPlanView(canvas, store) {
       ctx.fill();
       ctx.stroke();
     };
-    if (f.type === 'shower') {
+    const finish = { white: '#f2f1ec', wood: '#c79c72', black: '#3a3b40', grey: '#9aa0a8' }[f.finish] || '#f2f1ec';
+    if (f.type === 'rail') {
+      ctx.fillStyle = 'rgba(0,0,0,0.04)';
+      rr(-hw, -hl, hw, hl, 0.01);
+      ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+      ctx.beginPath();
+      ctx.moveTo((-hw + 0.04) * s, 0);
+      ctx.lineTo((hw - 0.04) * s, 0);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(0,0,0,0.22)';
+      for (let x = -hw + 0.08; x < hw - 0.05; x += 0.08) {
+        ctx.beginPath();
+        ctx.moveTo(x * s, (-hl + 0.08) * s);
+        ctx.lineTo(x * s, (hl - 0.08) * s);
+        ctx.stroke();
+      }
+    } else if (f.type === 'shelves') {
+      ctx.fillStyle = finish;
+      rr(-hw, -hl, hw, hl, 0.01);
+      ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+      for (let x = -hw + 0.5; x < hw - 0.05; x += 0.5) {
+        ctx.beginPath();
+        ctx.moveTo(x * s, -hl * s);
+        ctx.lineTo(x * s, hl * s);
+        ctx.stroke();
+      }
+    } else if (f.type === 'bench') {
+      ctx.fillStyle = '#b9a58f';
+      rr(-hw, -hl, hw, hl, 0.08);
+    } else if (f.type === 'mirror') {
+      ctx.fillStyle = '#cfe3f5';
+      ctx.strokeStyle = 'rgba(40,50,70,0.7)';
+      rr(-hw, -hl, hw, hl, 0);
+    } else if (f.type === 'shower') {
       ctx.fillStyle = '#e6eef5';
       rr(-hw, -hl, hw, hl, 0.02);
       ctx.strokeStyle = 'rgba(40,50,70,0.3)';
@@ -528,14 +563,15 @@ export function createPlanView(canvas, store) {
 
   function drawEnsuite(d, e, selected, err) {
     const L = ensuiteLayout(d.room, e);
-    // tiled floor
-    ctx.fillStyle = '#e9eef3';
+    const bath = e.id === 'ensuite';
+    // tiled floor in the bathroom; the walk-in keeps the bedroom floor
+    ctx.fillStyle = bath ? '#e9eef3' : '#f6f1e8';
     fillR(L.interior);
     ctx.save();
     ctx.beginPath();
     ctx.rect(X(L.interior.x0), Y(L.interior.y0), (L.interior.x1 - L.interior.x0) * s, (L.interior.y1 - L.interior.y0) * s);
     ctx.clip();
-    ctx.strokeStyle = 'rgba(60,80,110,0.12)';
+    ctx.strokeStyle = bath ? 'rgba(60,80,110,0.12)' : 'rgba(0,0,0,0)';
     ctx.lineWidth = 1;
     ctx.beginPath();
     for (let x = 0.3; x < d.room.width; x += 0.3) {
@@ -600,7 +636,8 @@ export function createPlanView(canvas, store) {
     }
     const fs = Math.max(10, Math.min(13, s * 0.1));
     const r = L.interior;
-    label('Ensuite', X((r.x0 + r.x1) / 2), Y((r.y0 + r.y1) / 2), { size: fs, weight: 600, color: C.muted, bg: 'rgba(255,255,255,0.75)' });
+    const c = L.clear || r;
+    label(bath ? 'Ensuite' : 'Walk-in closet', X((c.x0 + c.x1) / 2), Y(bath ? (c.y0 + c.y1) / 2 : c.y0 + 0.12), { size: fs, weight: 600, color: C.muted, bg: 'rgba(255,255,255,0.75)' });
   }
 
   function drawLight(l, selected) {
@@ -675,8 +712,8 @@ export function createPlanView(canvas, store) {
     fillR({ x0: 0, y0: 0, x1: room.width, y1: room.length });
     drawGrid(room);
 
-    // walkway and chair zones under the furniture
-    for (const item of [...d.beds, ...d.desks, ...d.closets]) {
+    // walkway and chair zones under the furniture (hidden while only viewing)
+    for (const item of store.viewOnly ? [] : [...d.beds, ...d.desks, ...d.closets]) {
       for (const strip of a.items[item.id].strips) {
         ctx.fillStyle = strip.ok ? C.okStrip : C.badStrip;
         fillR(strip.rect);
@@ -690,6 +727,7 @@ export function createPlanView(canvas, store) {
 
     // the ensuite covers any walkway zones that run into it
     if (d.ensuite) drawEnsuite(d, d.ensuite, sel && sel.kind === 'ensuite', a.items.ensuite.error);
+    if (d.walkin) drawEnsuite(d, d.walkin, sel && sel.kind === 'walkin', a.items.walkin.error);
     for (const op of d.openings) drawOpening(d, op, sel && sel.kind === 'opening' && sel.id === op.id);
     for (const bed of d.beds) drawBed(bed, a.beds[bed.id], sel && sel.kind === 'bed' && sel.id === bed.id);
     for (const k of d.desks) drawDesk(d, k, a.items[k.id], sel);
@@ -705,7 +743,7 @@ export function createPlanView(canvas, store) {
     const selBed = sel && (sel.kind === 'bed' || sel.kind === 'desk' || sel.kind === 'closet') && store.selectedItem();
     if (selBed) drawGaps(d, selBed);
 
-    if (!d.beds.length && !d.openings.length && !d.desks.length && !d.closets.length && !d.ensuite) {
+    if (!d.beds.length && !d.openings.length && !d.desks.length && !d.closets.length && !d.ensuite && !d.walkin) {
       label('Set the room size, then add a door, a window and a bed from the panel.', cw / 2, ch - 22, { size: 13, color: C.muted });
     }
   }
@@ -748,6 +786,7 @@ export function createPlanView(canvas, store) {
       }
     }
     if (d.ensuite && pointInRect(p, ensuiteLayout(d.room, d.ensuite).rect)) return { kind: 'ensuite', id: 'ensuite' };
+    if (d.walkin && pointInRect(p, ensuiteLayout(d.room, d.walkin).rect)) return { kind: 'walkin', id: 'walkin' };
     return null;
   }
 
@@ -769,7 +808,7 @@ export function createPlanView(canvas, store) {
   }
 
   canvas.addEventListener('pointerdown', (e) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || store.viewOnly) return;
     const p = pointer(e);
     const h = hitTest(p);
     if (!h) {
@@ -777,7 +816,7 @@ export function createPlanView(canvas, store) {
       return;
     }
     store.select({ kind: h.kind, id: h.id, part: h.part });
-    if (h.kind === 'strip' || h.kind === 'ensuite') return;
+    if (h.kind === 'strip' || h.kind === 'ensuite' || h.kind === 'walkin') return;
     const item = store.selectedItem();
     store.begin();
     if (h.kind === 'opening') drag = { kind: 'opening', id: h.id, grab: h.along - item.pos };
@@ -788,7 +827,7 @@ export function createPlanView(canvas, store) {
   canvas.addEventListener('pointermove', (e) => {
     const p = pointer(e);
     if (!drag) {
-      canvas.style.cursor = hitTest(p) ? 'grab' : 'default';
+      canvas.style.cursor = !store.viewOnly && hitTest(p) ? 'grab' : 'default';
       return;
     }
     canvas.style.cursor = 'grabbing';

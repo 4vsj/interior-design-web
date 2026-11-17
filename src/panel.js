@@ -6,14 +6,14 @@ import {
 } from './geometry.js';
 import { CLOSET_FINISHES, CLOSET_LIMITS, CLOSET_STYLES } from './closets.js';
 import {
-  clampEnsuite, CORNERS, doorFromLabel, doorRange, ENS_DOORS, ENS_LIMITS, sideLabels, WET,
+  clampEnsuite, CORNERS, doorFromLabel, doorRange, ENS_DOORS, ENS_LIMITS, sideLabels, STORAGE, WET,
 } from './ensuite.js';
 import {
-  addBed, addCloset, addDesk, addEnsuite, addLight, addOpening, addStrip, ATTACH, clampOpeningHeights, deleteSelected, duplicateSelected,
+  addBed, addCloset, addDesk, addEnsuite, addWalkin, addLight, addOpening, addStrip, ATTACH, clampOpeningHeights, deleteSelected, duplicateSelected,
   EFFECTS, LIGHT_TYPES, LIMITS, maxCord, rotateSelected, setMode, store, stripTargets, SWINGS, TEMPS,
 } from './state.js';
 import {
-  CASES, CHAIRS, COOLERS, DESK_LIMITS, FINISHES, GPUS, KEYBOARDS, MONITORS, PARTS,
+  CASES, CHAIRS, COMPUTER, COOLERS, DESK_LIMITS, FINISHES, GPUS, KEYBOARDS, MONITORS, PARTS,
 } from './desks.js';
 import { closetDescription, closetName, deskName } from './geometry.js';
 import { fieldStep, fieldValue, fmtMattress, fromDisplay, UNIT_LABEL } from './units.js';
@@ -74,9 +74,13 @@ function bedEditor(d, bed) {
 
 function deskEditor(d, k, part) {
   const u = d.units;
-  let html = selectField('desk.part', 'Editing', part, Object.entries(PARTS));
+  // only offer the pieces this setup has
+  const gone = { full: [], screen: ['pc'], none: ['pc', 'monitor', 'keyboard'] }[k.computer || 'full'];
+  if (gone.includes(part)) part = 'setup';
+  let html = selectField('desk.part', 'Editing', part, Object.entries(PARTS).filter(([p]) => !gone.includes(p)));
   if (part === 'setup') {
     const r = bedRect(k);
+    html += selectField('desk.computer', 'On the desk', k.computer || 'full', Object.entries(COMPUTER));
     html += selectField('desk.back', 'Desk back against', ROT_HEAD[k.rot], WALLS.map((x) => [x, WALL_LABEL[x]]));
     html += numberField('desk.left', 'From left wall', r.x0, u, { min: -10 });
     html += numberField('desk.top', 'From top wall', r.y0, u, { min: -10 });
@@ -122,7 +126,10 @@ function closetEditor(d, c) {
   return html;
 }
 
-function ensuiteEditor(d, e) {
+const YESNO = [['on', 'Yes'], ['off', 'No']];
+
+/** Corner, size and door fields shared by the ensuite and the walk-in closet. */
+function zoneShell(d, e) {
   const u = d.units;
   const sides = sideLabels(e);
   const [, dMax] = doorRange(e);
@@ -132,7 +139,22 @@ function ensuiteEditor(d, e) {
   html += selectField('en.doorSide', 'Door on', e.doorSide, [['v', sides.v], ['h', sides.h]]);
   html += numberField('en.doorAt', doorFromLabel(e), e.doorAt, u, { max: dMax });
   html += numberField('en.doorWidth', 'Door width', e.doorWidth, u, ENS_LIMITS.door);
-  html += selectField('en.door', 'Door', e.door, Object.entries(ENS_DOORS));
+  const doors = Object.entries(ENS_DOORS).map(([k, t]) => [k, k === 'in' && e.id === 'walkin' ? 'Swings into closet' : t]);
+  html += selectField('en.door', 'Door', e.door, doors);
+  return html;
+}
+
+function walkinEditor(d, e) {
+  let html = zoneShell(d, e);
+  html += selectField('en.storage', 'Storage', e.storage, Object.entries(STORAGE));
+  html += selectField('en.finish', 'Finish', e.finish, Object.entries(CLOSET_FINISHES));
+  html += selectField('en.mirror', 'Full-length mirror', e.mirror ? 'on' : 'off', YESNO);
+  html += selectField('en.bench', 'Bench to sit on', e.bench ? 'on' : 'off', YESNO);
+  return html;
+}
+
+function ensuiteEditor(d, e) {
+  let html = zoneShell(d, e);
   html += selectField('en.wet', 'Shower or bath', e.wet, Object.entries(WET));
   html += selectField('en.toilet', 'Toilet', e.toilet ? 'on' : 'off', [['on', 'Yes'], ['off', 'No']]);
   html += selectField('en.vanity', 'Vanity and basin', e.vanity ? 'on' : 'off', [['on', 'Yes'], ['off', 'No']]);
@@ -231,7 +253,7 @@ function render(panel) {
     const isSel = sel && sel.kind === 'desk' && sel.id === k.id;
     const err = store.analysis.items[k.id].error;
     html += `<li class="${isSel ? 'sel' : ''}"><button class="item" data-sel="desk:${k.id}" aria-expanded="${isSel}">
-      <b>${esc(deskName(d, k))}${err ? ' <i class="dot" title="Has a problem"></i>' : ''}</b><span>${esc(`${k.desk.shape === 'l' ? 'L-shaped' : 'Straight'} · ${CASES[k.pc.style].label.split(',')[0]}`)}</span></button>`;
+      <b>${esc(deskName(d, k))}${err ? ' <i class="dot" title="Has a problem"></i>' : ''}</b><span>${esc(`${k.desk.shape === 'l' ? 'L-shaped' : 'Straight'} · ${k.computer === 'none' ? 'Desk only' : k.computer === 'screen' ? 'No PC' : CASES[k.pc.style].label.split(',')[0]}`)}</span></button>`;
     if (isSel) html += `<div class="editor">${deskEditor(d, k, sel.part || 'setup')}${itemActions(true)}</div>`;
     html += '</li>';
   }
@@ -262,6 +284,21 @@ function render(panel) {
     html += `<ul class="items"><li class="${isSel ? 'sel' : ''}"><button class="item" data-sel="ensuite:ensuite" aria-expanded="${isSel}">
       <b>Ensuite${err ? ' <i class="dot" title="Has a problem"></i>' : ''}</b><span>${esc(ensuiteDescription(e))}</span></button>`;
     if (isSel) html += `<div class="editor">${ensuiteEditor(d, e)}${itemActions(false, false)}</div>`;
+    html += '</li></ul>';
+  }
+  html += '</section>';
+
+  html += '<section><h2>Walk-in closet</h2>';
+  if (!d.walkin) {
+    html += `<div class="btnrow"><button class="add" data-act="add-walkin">+ Add walk-in closet</button></div>
+      <p class="empty">Walls off one corner as a walk-in closet and changing room, with its own door, rails, shelves, a mirror and a bench.</p>`;
+  } else {
+    const e = d.walkin;
+    const isSel = sel && sel.kind === 'walkin';
+    const err = store.analysis.items.walkin.error;
+    html += `<ul class="items"><li class="${isSel ? 'sel' : ''}"><button class="item" data-sel="walkin:walkin" aria-expanded="${isSel}">
+      <b>Walk-in closet${err ? ' <i class="dot" title="Has a problem"></i>' : ''}</b><span>${esc(`${CORNERS[e.corner]} · ${e.storage === 'two' ? 'Rail and shelves' : 'Rail'}`)}</span></button>`;
+    if (isSel) html += `<div class="editor">${walkinEditor(d, e)}${itemActions(false, false)}</div>`;
     html += '</li></ul>';
   }
   html += '</section>';
@@ -328,6 +365,7 @@ function onChange(e) {
     const ok = store.commit((d) => {
       d.room[prop] = v;
       if (d.ensuite) clampEnsuite(d.room, d.ensuite);
+      if (d.walkin) clampEnsuite(d.room, d.walkin);
       for (const c of d.closets) c.closet.height = Math.min(c.closet.height, d.room.height);
       for (const op of d.openings) {
         clampOpeningHeights(op, d.room.height);
@@ -396,6 +434,7 @@ function onChange(e) {
       if (!k) return false;
       if (grp === 'desk') {
         if (prop === 'back') Object.assign(k, headAgainst(d.room, k, raw));
+        else if (prop === 'computer') k.computer = raw;
         else if (prop === 'left') k.x = m + bedSize(k).fw / 2;
         else if (prop === 'top') k.y = m + bedSize(k).fh / 2;
         return true;
@@ -435,12 +474,12 @@ function onChange(e) {
     });
     return;
   }
-  if (sel && sel.kind === 'ensuite' && key.startsWith('en.')) {
+  if (sel && (sel.kind === 'ensuite' || sel.kind === 'walkin') && key.startsWith('en.')) {
     const prop = key.slice(3);
     store.commit((d) => {
-      const e = d.ensuite;
+      const e = d[sel.kind];
       if (!e) return false;
-      if (prop === 'toilet' || prop === 'vanity') e[prop] = raw === 'on';
+      if (['toilet', 'vanity', 'mirror', 'bench'].includes(prop)) e[prop] = raw === 'on';
       else if (el.type === 'number') e[prop] = m;
       else e[prop] = raw;
       clampEnsuite(d.room, e);
@@ -510,6 +549,7 @@ function onClick(e) {
   else if (act === 'add-desk') addDesk();
   else if (act === 'add-closet') addCloset();
   else if (act === 'add-ensuite') addEnsuite();
+  else if (act === 'add-walkin') addWalkin();
   else if (act === 'add-light') addLight();
   else if (act === 'add-strip') addStrip();
   else if (act === 'mode-day') setMode('day');

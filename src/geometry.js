@@ -3,7 +3,7 @@
 import { footprint, FRAMES, MATTRESS, sizeShort } from './beds.js';
 import { deskFootprint, deskLayout } from './desks.js';
 import { CLOSET_STYLES, closetFootprint, closetFrontZone } from './closets.js';
-import { ensuiteLayout, FIXTURE_NAME } from './ensuite.js';
+import { ensuiteLayout, FIXTURE_NAME, STAND, ZONE_NAME } from './ensuite.js';
 
 /** Beds, desk setups and closets share placement maths; a setup has `desk`, a closet `closet`. */
 const fpOf = (item) => (item.desk ? deskFootprint(item) : item.closet ? closetFootprint(item) : footprint(item));
@@ -265,20 +265,22 @@ export function analyze(design) {
   const items = {};
   const desks = design.desks || [];
   const closets = design.closets || [];
-  const ens = design.ensuite ? ensuiteLayout(room, design.ensuite) : null;
+  // walled-off corners: the ensuite and the walk-in closet
+  const zones = [design.ensuite, design.walkin].filter(Boolean).map((z) => ({ z, L: ensuiteLayout(room, z), name: ZONE_NAME[z.id] }));
+  const zoneOf = (id) => zones.find((x) => x.z.id === id);
   // every solid footprint, tagged with its owner
   const owners = [
     ...design.beds.map((b) => ({ kind: 'bed', item: b, name: bedName(design, b), rects: [bedRect(b)] })),
     ...desks.map((s) => ({ kind: 'desk', item: s, name: deskName(design, s), rects: deskSolids(s) })),
     ...closets.map((c) => ({ kind: 'closet', item: c, name: closetName(design, c), rects: [bedRect(c)] })),
   ];
-  if (ens) owners.push({ kind: 'ensuite', item: design.ensuite, name: 'the ensuite', rects: [ens.rect] });
+  for (const zn of zones) owners.push({ kind: zn.z.id, item: zn.z, name: zn.name, rects: [zn.L.rect] });
   const swings = design.openings
     .filter((o) => o.type === 'door')
     .map((o) => ({ name: openingName(design, o), sw: doorSwing(room, o) }))
     .filter((s) => s.sw.inward);
   // an ensuite door that opens into the bedroom needs the same clear arc
-  if (ens && ens.swing && ens.swing.inward) swings.push({ name: 'the ensuite door', sw: ens.swing, ensuite: true });
+  for (const zn of zones) if (zn.L.swing && zn.L.swing.inward) swings.push({ name: `${zn.name} door`, sw: zn.L.swing, zone: zn.z.id });
   for (const o of owners) items[o.item.id] = { error: false, strips: [] };
   const hitsOthers = (rect, self) => owners.some((o) => o !== self && o.rects.some((r) => rectsOverlap(rect, r)));
 
@@ -297,7 +299,7 @@ export function analyze(design) {
       }
     }
     for (const sw of swings) {
-      if (sw.ensuite && o.kind === 'ensuite') continue;
+      if (sw.zone && o.kind === sw.zone) continue;
       if (o.rects.some((r) => rectHitsSwing(r, sw.sw))) err(`${o.name} blocks ${sw.name} from opening.`);
     }
 
@@ -330,13 +332,19 @@ export function analyze(design) {
         const what = o.item.closet.style === 'open' ? 'to reach the rail' : 'to open the doors';
         issues.push({ level: 'tip', id: o.item.id, kind: o.kind, text: `${o.name} has less than ${cm} in front ${what}.` });
       }
-    } else if (o.kind === 'ensuite') {
-      for (const t of ens.missing) {
-        issues.push({ level: 'tip', id: o.item.id, kind: o.kind, text: `The ensuite is too small for the ${FIXTURE_NAME[t]}. Make it bigger or remove something.` });
+    } else if (o.kind === 'ensuite' || o.kind === 'walkin') {
+      const zn = zoneOf(o.kind);
+      const N = cap(zn.name);
+      for (const t of zn.L.missing) {
+        issues.push({ level: 'tip', id: o.item.id, kind: o.kind, text: `${N} is too small for the ${FIXTURE_NAME[t]}. Make it bigger or remove something.` });
       }
-      if (ens.swing && !ens.swing.inward) {
-        const hit = ens.fixtures.find((f) => rectHitsSwing(f.rect, ens.swing));
-        if (hit) issues.push({ level: 'tip', id: o.item.id, kind: o.kind, text: `The ensuite door hits the ${FIXTURE_NAME[hit.type]} when it opens. Move the door or make it sliding.` });
+      if (zn.L.swing && !zn.L.swing.inward) {
+        const hit = zn.L.fixtures.find((f) => f.type !== 'mirror' && rectHitsSwing(f.rect, zn.L.swing));
+        if (hit) issues.push({ level: 'tip', id: o.item.id, kind: o.kind, text: `${N} door hits the ${FIXTURE_NAME[hit.type]} when it opens. Move the door or make it sliding.` });
+      }
+      const c = zn.L.clear;
+      if (c && Math.min(c.x1 - c.x0, c.y1 - c.y0) < STAND - 1e-6) {
+        issues.push({ level: 'tip', id: o.item.id, kind: o.kind, text: `${N} has less than ${design.units === 'ft' ? '2.5 ft' : '80 cm'} of floor to stand and get changed.` });
       }
     } else {
       const L = deskLayout(o.item);

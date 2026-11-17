@@ -44,11 +44,26 @@ const HINTS = {
   '3d': 'WASD to move, Q/E for down/up, Shift for speed. Drag to look, right-drag to pan, scroll to zoom.',
 };
 
+const VIEW_HINT = {
+  '2d': 'View only: nothing can be selected or moved. Press V or Edit to make changes.',
+  '3d': 'View only. WASD to move, Q/E for down/up, Shift for speed. Drag to look, scroll to zoom. Press V or Edit to make changes.',
+};
+
+/** View-only mode: the panel goes away and nothing can be selected, dragged or changed. */
+function setMode(mode) {
+  store.viewOnly = mode === 'view';
+  document.body.classList.toggle('viewing', store.viewOnly);
+  for (const b of document.querySelectorAll('button[data-mode]')) b.setAttribute('aria-pressed', String(b.dataset.mode === mode));
+  hint.textContent = (store.viewOnly ? VIEW_HINT : HINTS)[store.view];
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  store.select(null);
+}
+
 function setView(v) {
   store.view = v;
   document.body.dataset.view = v;
   for (const b of document.querySelectorAll('button[data-view]')) b.setAttribute('aria-pressed', String(b.dataset.view === v));
-  hint.textContent = HINTS[v];
+  hint.textContent = (store.viewOnly ? VIEW_HINT : HINTS)[v];
   if (v === '3d') {
     loadScene().then((s) => {
       if (s && store.view === '3d') s.setActive(true);
@@ -82,6 +97,7 @@ store.subscribe((st, evt) => {
 });
 
 for (const b of document.querySelectorAll('button[data-view]')) b.addEventListener('click', () => setView(b.dataset.view));
+for (const b of document.querySelectorAll('button[data-mode]')) b.addEventListener('click', () => setMode(b.dataset.mode));
 $('#undo').addEventListener('click', () => store.undo());
 $('#cam-overview').addEventListener('click', () => scene && scene.overview());
 $('#cam-eye').addEventListener('click', () => scene && scene.eyeLevel());
@@ -130,6 +146,12 @@ window.addEventListener('keydown', (e) => {
     }
     return;
   }
+  if (!mod && k === 'v') {
+    setMode(store.viewOnly ? 'edit' : 'view');
+    e.preventDefault();
+    return;
+  }
+  if (store.viewOnly) return; // looking only: no shortcut changes the plan
   if (mod && k === 'z' && !e.shiftKey) store.undo();
   else if ((mod && k === 'z' && e.shiftKey) || (mod && k === 'y')) store.redo();
   else if (mod && k === 'd') duplicateSelected();
