@@ -70,6 +70,8 @@ export function normalizeEnsuite(raw, room) {
   if (!raw || typeof raw !== 'object') return null;
   const e = defaultEnsuite(room);
   e.corner = pick(raw.corner, CORNERS, e.corner);
+  e.offX = num(raw.offX, 0);
+  e.offY = num(raw.offY, 0);
   e.width = num(raw.width, e.width);
   e.length = num(raw.length, e.length);
   e.doorSide = raw.doorSide === 'h' ? 'h' : 'v';
@@ -86,6 +88,8 @@ export function normalizeWalkin(raw, room) {
   if (!raw || typeof raw !== 'object') return null;
   const e = defaultWalkin(room);
   e.corner = pick(raw.corner, CORNERS, e.corner);
+  e.offX = num(raw.offX, 0);
+  e.offY = num(raw.offY, 0);
   e.width = num(raw.width, e.width);
   e.length = num(raw.length, e.length);
   e.doorSide = raw.doorSide === 'h' ? 'h' : 'v';

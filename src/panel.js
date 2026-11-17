@@ -6,7 +6,7 @@ import {
 } from './geometry.js';
 import { CLOSET_FINISHES, CLOSET_LIMITS, CLOSET_STYLES } from './closets.js';
 import {
-  clampEnsuite, CORNERS, doorFromLabel, doorRange, ENS_DOORS, ENS_LIMITS, sideLabels, STORAGE, WET,
+  clampEnsuite, CORNERS, doorFromLabel, ensuiteLayout, placeZone, doorRange, ENS_DOORS, ENS_LIMITS, sideLabels, STORAGE, WET,
 } from './ensuite.js';
 import {
   addBed, addCloset, addDesk, addEnsuite, addWalkin, addLight, addOpening, addStrip, ATTACH, clampOpeningHeights, deleteSelected, duplicateSelected,
@@ -133,7 +133,10 @@ function zoneShell(d, e) {
   const u = d.units;
   const sides = sideLabels(e);
   const [, dMax] = doorRange(e);
-  let html = selectField('en.corner', 'Corner', e.corner, Object.entries(CORNERS));
+  const r = ensuiteLayout(d.room, e).rect;
+  let html = selectField('en.corner', 'Nearest corner', e.corner, Object.entries(CORNERS));
+  html += numberField('en.left', 'From left wall', r.x0, u);
+  html += numberField('en.top', 'From top wall', r.y0, u);
   html += numberField('en.width', 'Width (left to right)', e.width, u, { min: ENS_LIMITS.size.min, max: Math.min(ENS_LIMITS.size.max, d.room.width - 0.6) });
   html += numberField('en.length', 'Length (top to bottom)', e.length, u, { min: ENS_LIMITS.size.min, max: Math.min(ENS_LIMITS.size.max, d.room.length - 0.6) });
   html += selectField('en.doorSide', 'Door on', e.doorSide, [['v', sides.v], ['h', sides.h]]);
@@ -195,6 +198,9 @@ const itemActions = (rotate, duplicate = true) => `<div class="btnrow">
   ${rotate ? '<button data-act="rotate" title="Shortcut: R">Rotate 90°</button>' : ''}
   ${duplicate ? '<button data-act="duplicate" title="Shortcut: Ctrl+D">Duplicate</button>' : ''}
   <button data-act="delete" class="danger" title="Shortcut: Delete">Delete</button></div>`;
+
+let lastSelKey = '';
+const reduceMotion = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 function render(panel) {
   const d = store.design;
@@ -332,6 +338,21 @@ function render(panel) {
   const scroll = panel.scrollTop;
   panel.innerHTML = html;
   panel.scrollTop = scroll;
+  // a new selection brings its fields into view, wherever the panel was scrolled to
+  const selKey = sel ? `${sel.kind}:${sel.id}` : '';
+  if (selKey && selKey !== lastSelKey) {
+    const li = panel.querySelector('li.sel');
+    if (li) {
+      const pr = panel.getBoundingClientRect();
+      const lr = li.getBoundingClientRect();
+      const fits = lr.top >= pr.top && lr.bottom <= pr.bottom;
+      if (!fits) {
+        // line the item's header up with the top of the panel
+        panel.scrollTo({ top: Math.max(0, lr.top - pr.top + panel.scrollTop - 8), behavior: reduceMotion() ? 'auto' : 'smooth' });
+      }
+    }
+  }
+  lastSelKey = selKey;
   if (focusKey) {
     const el = panel.querySelector(`[data-key="${focusKey}"],[data-act="${focusKey}"],[data-sel="${focusKey}"]`);
     if (el) el.focus();
@@ -479,7 +500,17 @@ function onChange(e) {
     store.commit((d) => {
       const e = d[sel.kind];
       if (!e) return false;
-      if (['toilet', 'vanity', 'mirror', 'bench'].includes(prop)) e[prop] = raw === 'on';
+      const r = ensuiteLayout(d.room, e).rect;
+      if (prop === 'left' || prop === 'top') {
+        placeZone(d.room, e, prop === 'left' ? m : r.x0, prop === 'top' ? m : r.y0, 0.005, 0.01);
+        return true;
+      }
+      if (prop === 'corner') {
+        // a new corner starts flush in that corner
+        e.corner = raw;
+        e.offX = 0;
+        e.offY = 0;
+      } else if (['toilet', 'vanity', 'mirror', 'bench'].includes(prop)) e[prop] = raw === 'on';
       else if (el.type === 'number') e[prop] = m;
       else e[prop] = raw;
       clampEnsuite(d.room, e);

@@ -33,7 +33,7 @@ const isTop = (e) => e.corner.startsWith('top');
 
 export function defaultEnsuite(room) {
   const e = {
-    id: 'ensuite', corner: 'top-right', width: 1.8, length: 2.1,
+    id: 'ensuite', corner: 'top-right', offX: 0, offY: 0, width: 1.8, length: 2.1,
     doorSide: 'v', doorAt: 99, doorWidth: 0.72, door: 'in', wet: 'shower', toilet: true, vanity: true,
   };
   clampEnsuite(room, e);
@@ -42,7 +42,7 @@ export function defaultEnsuite(room) {
 
 export function defaultWalkin(room) {
   const e = {
-    id: 'walkin', corner: 'bottom-left', width: 2.0, length: 2.0,
+    id: 'walkin', corner: 'bottom-left', offX: 0, offY: 0, width: 2.0, length: 2.0,
     doorSide: 'v', doorAt: 99, doorWidth: 0.72, door: 'in', storage: 'two', mirror: true, bench: true, finish: 'white',
   };
   clampEnsuite(room, e);
@@ -52,7 +52,9 @@ export function defaultWalkin(room) {
 /** Door range along its partition: [min, max] distance from the outer wall. */
 export function doorRange(e) {
   const inner = (e.doorSide === 'v' ? e.length : e.width) - ENS_T;
-  return [GAP, Math.max(GAP, inner - e.doorWidth - GAP)];
+  // pulled away from a room wall, the far end has its own partition too
+  const start = ((e.doorSide === 'v' ? e.offY : e.offX) > 0 ? ENS_T : 0) + GAP;
+  return [start, Math.max(start, inner - e.doorWidth - GAP)];
 }
 
 /** Keep sizes inside the room and the door inside its wall. Mutates e. */
@@ -61,11 +63,33 @@ export function clampEnsuite(room, e) {
   // leave at least 60 cm of bedroom beside it
   e.width = clamp(e.width, min, Math.max(min, Math.min(max, room.width - 0.6)));
   e.length = clamp(e.length, min, Math.max(min, Math.min(max, room.length - 0.6)));
+  // distance from the corner's two room walls; 0 is flush
+  e.offX = clamp(e.offX || 0, 0, Math.max(0, room.width - e.width));
+  e.offY = clamp(e.offY || 0, 0, Math.max(0, room.length - e.length));
   const inner = (e.doorSide === 'v' ? e.length : e.width) - ENS_T;
   e.doorWidth = clamp(e.doorWidth, ENS_LIMITS.door.min, Math.min(ENS_LIMITS.door.max, inner - 2 * GAP));
   const [a, b] = doorRange(e);
   e.doorAt = clamp(e.doorAt, a, b);
   return e;
+}
+
+/**
+ * Put the room's rectangle with its top-left at (x0, y0) on the plan: it takes the
+ * corner it's nearest to, and snaps flush to a room wall within `snap`.
+ */
+export function placeZone(room, e, x0, y0, snap = 0.15, grid = 0.1) {
+  const cx = x0 + e.width / 2;
+  const cy = y0 + e.length / 2;
+  const left = cx < room.width / 2;
+  const top = cy < room.length / 2;
+  let ox = left ? x0 : room.width - x0 - e.width;
+  let oy = top ? y0 : room.length - y0 - e.length;
+  ox = ox < snap ? 0 : Math.round(ox / grid) * grid;
+  oy = oy < snap ? 0 : Math.round(oy / grid) * grid;
+  e.corner = `${top ? 'top' : 'bottom'}-${left ? 'left' : 'right'}`;
+  e.offX = ox;
+  e.offY = oy;
+  return clampEnsuite(room, e);
 }
 
 /** Labels for the two partition walls, by the side of the room they face. */
@@ -107,8 +131,13 @@ export function ensuiteLayout(room, e) {
   const l = e.length;
   const iw = w - T;
   const il = l - T;
-  const px = (x) => (left ? x : W - x);
-  const py = (y) => (top ? y : L - y);
+  const ox = e.offX || 0;
+  const oy = e.offY || 0;
+  // inner edges on the sides away from the corner when the room is pulled off a wall
+  const a0 = ox > 0 ? T : 0;
+  const b0 = oy > 0 ? T : 0;
+  const px = (x) => (left ? ox + x : W - ox - x);
+  const py = (y) => (top ? oy + y : L - oy - y);
   const R = (r) => {
     const xa = px(r.x0); const xb = px(r.x1); const ya = py(r.y0); const yb = py(r.y1);
     return { x0: Math.min(xa, xb), y0: Math.min(ya, yb), x1: Math.max(xa, xb), y1: Math.max(ya, yb) };
@@ -122,6 +151,8 @@ export function ensuiteLayout(room, e) {
   const wallsC = v
     ? [{ x0: iw, y0: 0, x1: w, y1: da }, { x0: iw, y0: da + dw, x1: w, y1: l }, { x0: 0, y0: il, x1: iw, y1: l }]
     : [{ x0: 0, y0: il, x1: da, y1: l }, { x0: da + dw, y0: il, x1: w, y1: l }, { x0: iw, y0: 0, x1: w, y1: il }];
+  if (ox > 0) wallsC.push({ x0: 0, y0: 0, x1: T, y1: l });
+  if (oy > 0) wallsC.push({ x0: 0, y0: 0, x1: w, y1: T });
 
   // hinge on the end nearer the corner of the two partitions; the leaf hangs on the face it opens to
   let swing = null;
@@ -134,9 +165,16 @@ export function ensuiteLayout(room, e) {
     swing = swingFrom(P(hinge), P(other), m, dw, e.door === 'out');
   }
 
-  // fixtures along the two outer walls: the "top" run (y = 0) and the "left" run (x = 0)
   const fixtures = [];
   const missing = [];
+  let clear = null;
+  const Rz = R;
+  {
+  // fixtures go in a frame that starts inside any extra partitions
+  const iw = w - T - a0;
+  const il = l - T - b0;
+  const R = (r) => Rz({ x0: r.x0 + a0, y0: r.y0 + b0, x1: r.x1 + a0, y1: r.y1 + b0 });
+  // fixtures along the two outer walls: the "top" run (y = 0) and the "left" run (x = 0)
   const put = (type, rc, back, wl) => {
     const back2 = {
       top: top ? 'top' : 'bottom', bottom: top ? 'bottom' : 'top', left: left ? 'left' : 'right', right: left ? 'right' : 'left',
@@ -149,7 +187,6 @@ export function ensuiteLayout(room, e) {
   };
   let topAt = 0;
   let leftAt = 0;
-  let clear = null;
   if (e.id === 'walkin') {
     // rail along one outer wall, shelving tower along the other, then a bench and a mirror
     const shelves = e.storage === 'two' && il - RAIL_D >= 0.4;
@@ -166,7 +203,7 @@ export function ensuiteLayout(room, e) {
     const fh = fr.y1 - fr.y0;
     if (e.bench) {
       const bw = Math.min(0.9, fw - 0.5);
-      if (bw >= 0.5 && fh >= 0.4 + STAND) {
+      if (bw >= 0.5 - 1e-6 && fh >= 0.4 + STAND - 1e-6) {
         const cx = (fr.x0 + fr.x1) / 2;
         const cy = (fr.y0 + fr.y1) / 2;
         put('bench', { x0: cx - bw / 2, y0: cy - 0.2, x1: cx + bw / 2, y1: cy + 0.2 }, 'bottom', { w: bw, l: 0.4 });
@@ -218,10 +255,11 @@ export function ensuiteLayout(room, e) {
     } else missing.push(type);
   }
 
+  }
   if (e.finish) for (const f of fixtures) f.finish = e.finish;
   return {
     rect: R({ x0: 0, y0: 0, x1: w, y1: l }),
-    interior: R({ x0: 0, y0: 0, x1: iw, y1: il }),
+    interior: R({ x0: a0, y0: b0, x1: iw, y1: il }),
     walls: wallsC.map(R).filter((r) => r.x1 - r.x0 > 1e-4 && r.y1 - r.y0 > 1e-4),
     gap: R(gapC),
     vertical: v, // door wall runs top to bottom on the plan

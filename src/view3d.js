@@ -541,7 +541,8 @@ export function createScene(container, store) {
       p = { x: w.start.x + w.u.x * mid + w.n.x * 0.35, y: w.start.y + w.u.y * mid + w.n.y * 0.35 };
     }
     const dir = new THREE.Vector3(W / 2 - p.x, 0, L / 2 - p.y).normalize();
-    flyTo(new THREE.Vector3(p.x, 1.6, p.y), new THREE.Vector3(p.x + dir.x * 1.2, 1.35, p.y + dir.z * 1.2));
+    // roughly seated-to-standing eye height, a bit below a tall adult's so the room doesn't feel small
+    flyTo(new THREE.Vector3(p.x, 1.45, p.y), new THREE.Vector3(p.x + dir.x * 1.2, 1.25, p.y + dir.z * 1.2));
   }
 
   function frameCamera(d, animate = false) {

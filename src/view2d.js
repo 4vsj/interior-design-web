@@ -8,7 +8,7 @@ import { deskLayout, finish2D } from './desks.js';
 import { stripSegments, TEMP_COLOR } from './lighting.js';
 import { closetName, deskSolids, deskName } from './geometry.js';
 import { closetDoors, closetFinish2D } from './closets.js';
-import { ensuiteLayout } from './ensuite.js';
+import { ensuiteLayout, placeZone } from './ensuite.js';
 
 /** Plan point to a rotated item's local coords (head/back at -y). */
 function toLocal(item, p) {
@@ -816,10 +816,13 @@ export function createPlanView(canvas, store) {
       return;
     }
     store.select({ kind: h.kind, id: h.id, part: h.part });
-    if (h.kind === 'strip' || h.kind === 'ensuite' || h.kind === 'walkin') return;
+    if (h.kind === 'strip') return;
     const item = store.selectedItem();
     store.begin();
-    if (h.kind === 'opening') drag = { kind: 'opening', id: h.id, grab: h.along - item.pos };
+    if (h.kind === 'ensuite' || h.kind === 'walkin') {
+      const r = ensuiteLayout(store.design.room, item).rect;
+      drag = { kind: h.kind, dx: p.x - r.x0, dy: p.y - r.y0 };
+    } else if (h.kind === 'opening') drag = { kind: 'opening', id: h.id, grab: h.along - item.pos };
     else drag = { kind: h.kind, id: h.id, dx: p.x - item.x, dy: p.y - item.y };
     canvas.setPointerCapture(e.pointerId);
   });
@@ -838,6 +841,11 @@ export function createPlanView(canvas, store) {
       if (!bed) return;
       const np = snapBed(d.room, bed, p.x - drag.dx, p.y - drag.dy);
       if (np.x !== bed.x || np.y !== bed.y) store.preview(() => Object.assign(bed, np));
+    } else if (drag.kind === 'ensuite' || drag.kind === 'walkin') {
+      const e = d[drag.kind];
+      if (!e) return;
+      const next = placeZone(d.room, { ...e }, p.x - drag.dx, p.y - drag.dy);
+      if (next.corner !== e.corner || next.offX !== e.offX || next.offY !== e.offY) store.preview(() => Object.assign(e, next));
     } else if (drag.kind === 'light') {
       const l = d.lighting.lights.find((x) => x.id === drag.id);
       if (!l) return;
