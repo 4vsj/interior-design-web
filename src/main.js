@@ -39,6 +39,9 @@ function loadScene() {
 (window.requestIdleCallback || ((f) => setTimeout(f, 1500)))(() => import('./view3d.js').catch(() => {}));
 
 const hint = $('#hint');
+// the views end where the hint bar starts, however many lines the hint wraps to
+const foot = $('.stage-foot');
+new ResizeObserver(() => $('.stage').style.setProperty('--foot', `${foot.offsetHeight}px`)).observe(foot);
 const HINTS = {
   '2d': 'Drag furniture, doors, windows and lights to move them. R rotates the selected bed, desk or closet.',
   '3d': 'WASD to move, Q/E for down/up, Shift for speed. Drag to look, right-drag to pan, scroll to zoom.',

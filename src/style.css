@@ -120,7 +120,8 @@ button.linkish:hover:not(:disabled) { background: transparent; color: var(--text
 .panel section.folded > :not(h2) { display: none; }
 
 .stage { position: relative; flex: 1; min-width: 0; }
-#plan, #three { position: absolute; inset: 0; width: 100%; height: 100%; }
+/* the plan and 3D view stop above the hint bar, so the hint never covers the room */
+#plan, #three { position: absolute; top: 0; left: 0; width: 100%; height: calc(100% - var(--foot, 34px)); }
 #plan { touch-action: none; display: block; }
 #three { touch-action: none; }
 #three canvas { display: block; width: 100%; height: 100%; }
@@ -146,16 +147,24 @@ body[data-view='2d'] .view-buttons { display: none; }
 
 .stage-foot {
   position: absolute;
-  left: 12px;
-  right: 12px;
-  bottom: 10px;
+  left: 0;
+  right: 0;
+  bottom: 0;
   display: flex;
   justify-content: space-between;
-  gap: 12px;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 12px;
+  min-height: 34px;
+  box-sizing: border-box;
+  background: var(--bg);
+  border-top: 1px solid var(--line);
   color: var(--muted);
   font-size: 12px;
-  pointer-events: none;
+  line-height: 1.4;
 }
+#hint { flex: 1; min-width: 0; }
+#saved { flex: none; white-space: nowrap; }
 #toast {
   position: absolute;
   left: 50%;
@@ -211,7 +220,7 @@ input[type='number']:focus, select:focus { border-color: var(--accent); box-shad
 #toast { animation: toast-in 0.18s ease; }
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, -6px); } to { opacity: 1; transform: translate(-50%, 0); } }
 body[data-view='3d'] .stage-foot { color: #7a8294; }
-body[data-view='3d'] #three.night ~ .stage-foot { color: #9aa3b8; }
+body[data-view='3d'] #three.night ~ .stage-foot { color: #9aa3b8; background: #0b0d14; border-top-color: #1c2234; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
