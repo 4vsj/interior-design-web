@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { FRAMES, footprint, mattressOf } from './beds.js';
 import { CASES, deskLayout, GPUS } from './desks.js';
+import { closetDoors } from './closets.js';
 
 const FINISH_COLOR = { wood: 0xa47851, white: 0xefeeea, black: 0x26272b };
 
@@ -408,5 +409,189 @@ function buildPC(s, Mt, rgbMat, own, tag) {
   const rf = fan(Math.min(0.05, w / 2 - 0.02), rgbMat, Mt, tag);
   rf.position.set(0.01, y0 + h * 0.75, -d / 2 + 0.02);
   g.add(rf);
+  return g;
+}
+
+// ---------- closets ----------
+
+const CLOSET_COLOR = { white: 0xf1f0eb, wood: 0xa47851, black: 0x2a2b2f, grey: 0x9aa0a8 };
+
+/** Closet with its back at -z and doors facing +z. */
+export function buildCloset3D(c) {
+  const { width: W, depth: D, height: H, style, finish } = c.closet;
+  const g = new THREE.Group();
+  const body = new THREE.MeshStandardMaterial({ color: CLOSET_COLOR[finish], roughness: 0.6 });
+  body.userData.own = true;
+  const inner = new THREE.MeshStandardMaterial({ color: finish === 'black' ? 0x3a3b40 : 0xe2ddd4, roughness: 0.8 });
+  inner.userData.own = true;
+  const metal = new THREE.MeshStandardMaterial({ color: 0xb8bcc2, roughness: 0.3, metalness: 0.8 });
+  metal.userData.own = true;
+  const box = (mat, w, h, d, x, y0, z) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    m.position.set(x, y0 + h / 2, z);
+    g.add(m);
+    return m;
+  };
+  const t = 0.018;
+  const plinth = 0.07;
+  box(body, W, plinth, D - 0.04, 0, 0, -0.02); // plinth, set back a little
+  box(body, t, H, D, -W / 2 + t / 2, 0, 0); // sides
+  box(body, t, H, D, W / 2 - t / 2, 0, 0);
+  box(body, W, t, D, 0, H - t, 0); // top
+  box(body, W - 2 * t, t, D - 0.02, 0, plinth, -0.01); // floor
+  box(inner, W - 2 * t, H - plinth - t, 0.008, 0, plinth, -D / 2 + 0.004); // back
+  // inside: a shelf over a hanging rail with some clothes
+  const shelfY = Math.min(H - 0.32, 1.85);
+  box(inner, W - 2 * t, t, D - 0.04, 0, shelfY, -0.01);
+  const railY = shelfY - 0.07;
+  const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, W - 2 * t, 10), metal);
+  rail.rotation.z = Math.PI / 2;
+  rail.position.set(0, railY, -0.01);
+  g.add(rail);
+  const tones = [0x3d4a5c, 0x8a6f5a, 0xc9c2b4, 0x5f7466, 0x2e2f33, 0xa9b6c8, 0x7b5560];
+  const clothesW = W - 2 * t - 0.1;
+  let x = -clothesW / 2;
+  let i = 0;
+  while (x < clothesW / 2 - 0.03) {
+    const cw = 0.03 + ((i * 37) % 5) * 0.008;
+    const len = Math.min(railY - plinth - 0.1, 0.75 + ((i * 53) % 4) * 0.12);
+    const mat = new THREE.MeshStandardMaterial({ color: tones[i % tones.length], roughness: 0.95 });
+    mat.userData.own = true;
+    box(mat, cw, len, Math.min(0.46, D - 0.1), x + cw / 2, railY - len - 0.02, -0.01);
+    x += cw + 0.012;
+    i++;
+  }
+  // boxes on the shelf
+  for (let k = 0; k < Math.floor((W - 0.1) / 0.45); k++) {
+    box(inner, 0.32, 0.18, Math.min(0.36, D - 0.12), -W / 2 + 0.25 + k * 0.45, shelfY + t, -0.02);
+  }
+
+  const n = closetDoors(c);
+  if (style === 'hinged') {
+    const pw = (W - 0.004 * (n + 1)) / n;
+    for (let k = 0; k < n; k++) {
+      const left = k % 2 === 0;
+      const pivot = new THREE.Group();
+      const hx = -W / 2 + 0.004 + k * (pw + 0.004) + (left ? 0 : pw);
+      pivot.position.set(hx, plinth, D / 2);
+      // the first door stands a little open so the inside shows
+      pivot.rotation.y = k === 0 ? 0.55 : 0;
+      const door = new THREE.Mesh(new THREE.BoxGeometry(pw, H - plinth - 0.004, t), body);
+      door.position.set(left ? pw / 2 : -pw / 2, (H - plinth) / 2, t / 2);
+      pivot.add(door);
+      const handle = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.3, 0.02), metal);
+      handle.position.set(left ? pw - 0.04 : -pw + 0.04, Math.min(1.0, (H - plinth) / 2), t + 0.012);
+      pivot.add(handle);
+      g.add(pivot);
+    }
+  } else if (style === 'sliding') {
+    const pw = W / n + 0.03;
+    for (let k = 0; k < n; k++) {
+      const z = D / 2 - (k % 2 ? 0.02 : 0.045);
+      // the last panel slides over so one bay shows
+      const xk = -W / 2 + (W / n) * (k + 0.5) - (k === n - 1 ? W / n * 0.55 : 0);
+      const door = box(body, pw, H - plinth - 0.03, t, xk, plinth + 0.015, z);
+      door.castShadow = true;
+      const pull = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.18, 0.012), metal);
+      pull.position.set(xk + (k % 2 ? -1 : 1) * (pw / 2 - 0.04), Math.min(1.0, H / 2), z + 0.014);
+      g.add(pull);
+    }
+    box(metal, W - 2 * t, 0.02, 0.06, 0, H - t - 0.02, D / 2 - 0.035);
+  }
+  g.traverse((o) => {
+    if (o.isMesh) {
+      o.castShadow = true;
+      o.receiveShadow = true;
+      o.userData.ownMaterial = true;
+    }
+  });
+  return g;
+}
+
+// ---------- bathroom fixtures ----------
+
+let BM = null;
+function bathMats() {
+  if (BM) return BM;
+  BM = {
+    ceramic: new THREE.MeshStandardMaterial({ color: 0xfbfbfa, roughness: 0.15 }),
+    chrome: new THREE.MeshStandardMaterial({ color: 0xd6dade, roughness: 0.12, metalness: 1 }),
+    glass: new THREE.MeshStandardMaterial({ color: 0xc8dbe8, roughness: 0.05, transparent: true, opacity: 0.22, depthWrite: false }),
+    vanity: new THREE.MeshStandardMaterial({ color: 0x8f7258, roughness: 0.55 }),
+    mirror: new THREE.MeshStandardMaterial({ color: 0xdfe7ee, roughness: 0.02, metalness: 1 }),
+    water: new THREE.MeshStandardMaterial({ color: 0xcfe2ee, roughness: 0.05, metalness: 0.2 }),
+    tray: new THREE.MeshStandardMaterial({ color: 0xeef1f3, roughness: 0.3 }),
+  };
+  return BM;
+}
+
+/** One fixture with its back at -z, built at the origin. */
+export function buildFixture3D(f) {
+  const Mt = bathMats();
+  const g = new THREE.Group();
+  const box = (mat, w, h, d, x, y0, z) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    m.position.set(x, y0 + h / 2, z);
+    g.add(m);
+    return m;
+  };
+  const rbox = (mat, w, h, d, r, x, y0, z) => {
+    const m = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 3, Math.min(r, h / 2 - 0.001, w / 2 - 0.001, d / 2 - 0.001)), mat);
+    m.position.set(x, y0 + h / 2, z);
+    g.add(m);
+    return m;
+  };
+  const hw = f.w / 2;
+  const hl = f.l / 2;
+  if (f.type === 'toilet') {
+    rbox(Mt.ceramic, 0.36, 0.38, 0.18, 0.03, 0, 0.42, -hl + 0.09); // cistern
+    rbox(Mt.ceramic, 0.22, 0.38, 0.3, 0.06, 0, 0, -hl + 0.3); // pedestal
+    const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.16, 0.08, 28), Mt.ceramic);
+    bowl.scale.z = 1.35;
+    bowl.position.set(0, 0.38, -hl + 0.42);
+    g.add(bowl);
+    const seat = new THREE.Mesh(new THREE.TorusGeometry(0.15, 0.025, 8, 28), Mt.ceramic);
+    seat.rotation.x = Math.PI / 2;
+    seat.scale.y = 1.3;
+    seat.position.set(0, 0.43, -hl + 0.43);
+    g.add(seat);
+    box(Mt.chrome, 0.05, 0.012, 0.03, 0.1, 0.8, -hl + 0.12);
+  } else if (f.type === 'vanity') {
+    box(Mt.vanity, f.w, 0.52, f.l - 0.02, 0, 0.3, -0.01); // wall-hung cabinet
+    rbox(Mt.ceramic, f.w + 0.02, 0.06, f.l, 0.01, 0, 0.82, 0);
+    const basin = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.13, 0.035, 28), Mt.water);
+    basin.scale.z = 0.8;
+    basin.position.set(0, 0.865, 0.03);
+    g.add(basin);
+    box(Mt.chrome, 0.025, 0.16, 0.025, 0, 0.88, -hl + 0.07);
+    box(Mt.chrome, 0.02, 0.02, 0.1, 0, 1.02, -hl + 0.11);
+    box(Mt.mirror, f.w - 0.04, 0.7, 0.015, 0, 1.15, -hl + 0.008);
+  } else if (f.type === 'shower') {
+    box(Mt.tray, f.w, 0.04, f.l, 0, 0, 0);
+    const drain = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.005, 20), Mt.chrome);
+    drain.position.set(0, 0.042, 0);
+    g.add(drain);
+    // glass on the two sides that face the bathroom (+z, and +x in local coords)
+    box(Mt.glass, f.w, 1.95, 0.008, 0, 0.04, hl - 0.004);
+    box(Mt.glass, 0.008, 1.95, f.l, hw - 0.004, 0.04, 0);
+    box(Mt.chrome, f.w, 0.02, 0.02, 0, 1.99, hl - 0.004);
+    box(Mt.chrome, 0.02, 0.02, f.l, hw - 0.004, 1.99, 0);
+    box(Mt.chrome, 0.02, 0.9, 0.02, -hw + 0.12, 1.1, -hl + 0.02); // riser
+    const head = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.012, 24), Mt.chrome);
+    head.position.set(-hw + 0.12, 2.0, -hl + 0.2);
+    g.add(head);
+    box(Mt.chrome, 0.015, 0.015, 0.18, -hw + 0.12, 2.0, -hl + 0.1);
+  } else if (f.type === 'bath') {
+    rbox(Mt.ceramic, f.w, 0.55, f.l, 0.05, 0, 0, 0);
+    rbox(Mt.water, f.w - 0.14, 0.02, f.l - 0.14, 0.008, 0, 0.47, 0);
+    box(Mt.chrome, 0.03, 0.12, 0.03, -hw + 0.12, 0.55, -hl + 0.05);
+    box(Mt.chrome, 0.02, 0.02, 0.12, -hw + 0.12, 0.65, -hl + 0.1);
+  }
+  g.traverse((o) => {
+    if (o.isMesh) {
+      o.castShadow = !o.material.transparent;
+      o.receiveShadow = true;
+    }
+  });
   return g;
 }

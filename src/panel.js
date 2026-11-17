@@ -4,14 +4,18 @@ import {
   bedDescription, bedName, bedRect, bedSize, clamp, fitOpening, headAgainst, keepHeadEdge,
   openingName, ROT_HEAD, WALL_LABEL, WALLS, wallInfo,
 } from './geometry.js';
+import { CLOSET_FINISHES, CLOSET_LIMITS, CLOSET_STYLES } from './closets.js';
 import {
-  addBed, addDesk, addLight, addOpening, addStrip, ATTACH, clampOpeningHeights, deleteSelected, duplicateSelected,
+  clampEnsuite, CORNERS, doorFromLabel, doorRange, ENS_DOORS, ENS_LIMITS, sideLabels, WET,
+} from './ensuite.js';
+import {
+  addBed, addCloset, addDesk, addEnsuite, addLight, addOpening, addStrip, ATTACH, clampOpeningHeights, deleteSelected, duplicateSelected,
   EFFECTS, LIGHT_TYPES, LIMITS, maxCord, rotateSelected, setMode, store, stripTargets, SWINGS, TEMPS,
 } from './state.js';
 import {
   CASES, CHAIRS, COOLERS, DESK_LIMITS, FINISHES, GPUS, KEYBOARDS, MONITORS, PARTS,
 } from './desks.js';
-import { deskName } from './geometry.js';
+import { closetDescription, closetName, deskName } from './geometry.js';
 import { fieldStep, fieldValue, fmtMattress, fromDisplay, UNIT_LABEL } from './units.js';
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -103,6 +107,42 @@ function deskEditor(d, k, part) {
   return html;
 }
 
+function closetEditor(d, c) {
+  const u = d.units;
+  const r = bedRect(c);
+  const k = c.closet;
+  let html = selectField('cl.style', 'Style', k.style, Object.entries(CLOSET_STYLES));
+  html += numberField('cl.width', 'Width', k.width, u, CLOSET_LIMITS.width);
+  html += numberField('cl.depth', 'Depth', k.depth, u, CLOSET_LIMITS.depth);
+  html += numberField('cl.height', 'Height', k.height, u, { min: CLOSET_LIMITS.height.min, max: Math.min(CLOSET_LIMITS.height.max, d.room.height) });
+  html += selectField('cl.finish', 'Finish', k.finish, Object.entries(CLOSET_FINISHES));
+  html += selectField('cl.back', 'Back against', ROT_HEAD[c.rot], WALLS.map((x) => [x, WALL_LABEL[x]]));
+  html += numberField('cl.left', 'From left wall', r.x0, u, { min: -10 });
+  html += numberField('cl.top', 'From top wall', r.y0, u, { min: -10 });
+  return html;
+}
+
+function ensuiteEditor(d, e) {
+  const u = d.units;
+  const sides = sideLabels(e);
+  const [, dMax] = doorRange(e);
+  let html = selectField('en.corner', 'Corner', e.corner, Object.entries(CORNERS));
+  html += numberField('en.width', 'Width (left to right)', e.width, u, { min: ENS_LIMITS.size.min, max: Math.min(ENS_LIMITS.size.max, d.room.width - 0.6) });
+  html += numberField('en.length', 'Length (top to bottom)', e.length, u, { min: ENS_LIMITS.size.min, max: Math.min(ENS_LIMITS.size.max, d.room.length - 0.6) });
+  html += selectField('en.doorSide', 'Door on', e.doorSide, [['v', sides.v], ['h', sides.h]]);
+  html += numberField('en.doorAt', doorFromLabel(e), e.doorAt, u, { max: dMax });
+  html += numberField('en.doorWidth', 'Door width', e.doorWidth, u, ENS_LIMITS.door);
+  html += selectField('en.door', 'Door', e.door, Object.entries(ENS_DOORS));
+  html += selectField('en.wet', 'Shower or bath', e.wet, Object.entries(WET));
+  html += selectField('en.toilet', 'Toilet', e.toilet ? 'on' : 'off', [['on', 'Yes'], ['off', 'No']]);
+  html += selectField('en.vanity', 'Vanity and basin', e.vanity ? 'on' : 'off', [['on', 'Yes'], ['off', 'No']]);
+  return html;
+}
+
+function ensuiteDescription(e) {
+  return `${CORNERS[e.corner]} · ${WET[e.wet] === 'Neither' ? 'Toilet only' : WET[e.wet]}`;
+}
+
 function lightEditor(d, l) {
   const u = d.units;
   let html = selectField('li.type', 'Type', l.type, Object.entries(LIGHT_TYPES));
@@ -129,9 +169,9 @@ function stripLabel(d, t) {
   return t.attach === 'desk' ? `Desk setup ${n} underside` : `Desk setup ${n} monitor`;
 }
 
-const itemActions = (rotate) => `<div class="btnrow">
+const itemActions = (rotate, duplicate = true) => `<div class="btnrow">
   ${rotate ? '<button data-act="rotate" title="Shortcut: R">Rotate 90°</button>' : ''}
-  <button data-act="duplicate" title="Shortcut: Ctrl+D">Duplicate</button>
+  ${duplicate ? '<button data-act="duplicate" title="Shortcut: Ctrl+D">Duplicate</button>' : ''}
   <button data-act="delete" class="danger" title="Shortcut: Delete">Delete</button></div>`;
 
 function render(panel) {
@@ -197,6 +237,35 @@ function render(panel) {
   }
   html += '</ul></section>';
 
+  html += `<section><h2>Closets</h2>
+    <div class="btnrow"><button class="add" data-act="add-closet">+ Add closet</button></div>`;
+  if (!d.closets.length) html += '<p class="empty">Wardrobes with hinged or sliding doors, or an open rail. They show how much room the doors need.</p>';
+  html += '<ul class="items">';
+  for (const c of d.closets) {
+    const isSel = sel && sel.kind === 'closet' && sel.id === c.id;
+    const err = store.analysis.items[c.id].error;
+    html += `<li class="${isSel ? 'sel' : ''}"><button class="item" data-sel="closet:${c.id}" aria-expanded="${isSel}">
+      <b>${esc(closetName(d, c))}${err ? ' <i class="dot" title="Has a problem"></i>' : ''}</b><span>${esc(closetDescription(c))}</span></button>`;
+    if (isSel) html += `<div class="editor">${closetEditor(d, c)}${itemActions(true)}</div>`;
+    html += '</li>';
+  }
+  html += '</ul></section>';
+
+  html += '<section><h2>Ensuite bathroom</h2>';
+  if (!d.ensuite) {
+    html += `<div class="btnrow"><button class="add" data-act="add-ensuite">+ Add ensuite</button></div>
+      <p class="empty">Walls off one corner as a bathroom with its own door, shower or bath, toilet and basin.</p>`;
+  } else {
+    const e = d.ensuite;
+    const isSel = sel && sel.kind === 'ensuite';
+    const err = store.analysis.items.ensuite.error;
+    html += `<ul class="items"><li class="${isSel ? 'sel' : ''}"><button class="item" data-sel="ensuite:ensuite" aria-expanded="${isSel}">
+      <b>Ensuite${err ? ' <i class="dot" title="Has a problem"></i>' : ''}</b><span>${esc(ensuiteDescription(e))}</span></button>`;
+    if (isSel) html += `<div class="editor">${ensuiteEditor(d, e)}${itemActions(false, false)}</div>`;
+    html += '</li></ul>';
+  }
+  html += '</section>';
+
   const night = d.lighting.mode === 'night';
   html += `<section><h2>Lighting</h2>
     <div class="field"><span>Time of day</span><div class="toggle small" role="group" aria-label="Time of day">
@@ -258,6 +327,8 @@ function onChange(e) {
     const v = clamp(m, lim.min, lim.max);
     const ok = store.commit((d) => {
       d.room[prop] = v;
+      if (d.ensuite) clampEnsuite(d.room, d.ensuite);
+      for (const c of d.closets) c.closet.height = Math.min(c.closet.height, d.room.height);
       for (const op of d.openings) {
         clampOpeningHeights(op, d.room.height);
         const pos = fitOpening(d, op, op.wall, op.pos);
@@ -343,6 +414,40 @@ function onChange(e) {
     });
     return;
   }
+  if (sel && sel.kind === 'closet' && key.startsWith('cl.')) {
+    const prop = key.slice(3);
+    store.commit((d) => {
+      const c = d.closets.find((x) => x.id === sel.id);
+      if (!c) return false;
+      if (prop === 'back') Object.assign(c, headAgainst(d.room, c, raw));
+      else if (prop === 'left') c.x = m + bedSize(c).fw / 2;
+      else if (prop === 'top') c.y = m + bedSize(c).fh / 2;
+      else {
+        const old = JSON.parse(JSON.stringify(c));
+        if (CLOSET_LIMITS[prop]) {
+          const lim = CLOSET_LIMITS[prop];
+          c.closet[prop] = clamp(m, lim.min, prop === 'height' ? Math.min(lim.max, d.room.height) : lim.max);
+        } else c.closet[prop] = raw;
+        // keep the back against the same wall
+        Object.assign(c, keepHeadEdge(old, c));
+      }
+      return true;
+    });
+    return;
+  }
+  if (sel && sel.kind === 'ensuite' && key.startsWith('en.')) {
+    const prop = key.slice(3);
+    store.commit((d) => {
+      const e = d.ensuite;
+      if (!e) return false;
+      if (prop === 'toilet' || prop === 'vanity') e[prop] = raw === 'on';
+      else if (el.type === 'number') e[prop] = m;
+      else e[prop] = raw;
+      clampEnsuite(d.room, e);
+      return true;
+    });
+    return;
+  }
   if (sel && sel.kind === 'light' && key.startsWith('li.')) {
     const prop = key.slice(3);
     store.commit((d) => {
@@ -403,6 +508,8 @@ function onClick(e) {
   else if (act === 'add-window') addOpening('window');
   else if (act === 'add-bed') addBed();
   else if (act === 'add-desk') addDesk();
+  else if (act === 'add-closet') addCloset();
+  else if (act === 'add-ensuite') addEnsuite();
   else if (act === 'add-light') addLight();
   else if (act === 'add-strip') addStrip();
   else if (act === 'mode-day') setMode('day');

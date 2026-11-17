@@ -6,7 +6,9 @@ import {
 import { fmtLen } from './units.js';
 import { deskLayout, finish2D } from './desks.js';
 import { stripSegments, TEMP_COLOR } from './lighting.js';
-import { deskSolids, deskName } from './geometry.js';
+import { closetName, deskSolids, deskName } from './geometry.js';
+import { closetDoors, closetFinish2D } from './closets.js';
+import { ensuiteLayout } from './ensuite.js';
 
 /** Plan point to a rotated item's local coords (head/back at -y). */
 function toLocal(item, p) {
@@ -399,6 +401,208 @@ export function createPlanView(canvas, store) {
     label(deskName(d, setup), X((lp.x0 + lp.x1) / 2), Y((lp.y0 + lp.y1) / 2), { size: fs, weight: 600, bg: 'rgba(255,255,255,0.75)' });
   }
 
+  function drawCloset(d, c, st, selected) {
+    const { width: W, depth: D, style } = c.closet;
+    ctx.save();
+    ctx.translate(X(c.x), Y(c.y));
+    ctx.rotate((c.rot * Math.PI) / 180);
+    const R = (x0, y0, x1, y1) => [x0 * s, y0 * s, (x1 - x0) * s, (y1 - y0) * s];
+    const hw = W / 2;
+    const hd = D / 2;
+    ctx.fillStyle = closetFinish2D(c);
+    softShadow(() => ctx.fillRect(...R(-hw, -hd, hw, hd)));
+    const n = closetDoors(c);
+    ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+    ctx.lineWidth = 1;
+    if (style === 'open') {
+      // hanging rail with a few hangers
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.moveTo((-hw + 0.04) * s, 0);
+      ctx.lineTo((hw - 0.04) * s, 0);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+      for (let x = -hw + 0.1; x < hw - 0.06; x += 0.08) {
+        ctx.beginPath();
+        ctx.moveTo(x * s, (-hd + 0.08) * s);
+        ctx.lineTo(x * s, (hd - 0.08) * s);
+        ctx.stroke();
+      }
+    } else if (style === 'sliding') {
+      // two tracks of overlapping panels along the front
+      const pw = W / n;
+      for (let i = 0; i < n; i++) {
+        const y = hd - (i % 2 ? 0.035 : 0.07);
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo((-hw + i * pw - (i ? 0.03 : 0)) * s, y * s);
+        ctx.lineTo((-hw + (i + 1) * pw + (i < n - 1 ? 0.03 : 0)) * s, y * s);
+        ctx.stroke();
+      }
+    } else {
+      // hinged: panel joints and the swing of each door
+      const pw = W / n;
+      ctx.setLineDash([3, 3]);
+      for (let i = 0; i < n; i++) {
+        const left = i % 2 === 0;
+        const hx = left ? -hw + i * pw : -hw + (i + 1) * pw;
+        ctx.beginPath();
+        if (left) ctx.arc(hx * s, hd * s, pw * s, 0, Math.PI / 2);
+        else ctx.arc(hx * s, hd * s, pw * s, Math.PI / 2, Math.PI);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      for (let i = 1; i < n; i++) {
+        ctx.beginPath();
+        ctx.moveTo((-hw + i * pw) * s, (hd - 0.08) * s);
+        ctx.lineTo((-hw + i * pw) * s, hd * s);
+        ctx.stroke();
+      }
+    }
+    // back panel line so the orientation reads
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    ctx.fillRect(...R(-hw, -hd, hw, -hd + 0.025));
+    ctx.lineWidth = selected ? 2.5 : 1.25;
+    ctx.strokeStyle = st.error ? C.error : selected ? C.accent : 'rgba(0,0,0,0.5)';
+    if (st.error) {
+      ctx.fillStyle = 'rgba(220,38,38,0.10)';
+      ctx.fillRect(...R(-hw, -hd, hw, hd));
+      ctx.lineWidth = 2.5;
+    }
+    ctx.strokeRect(...R(-hw, -hd, hw, hd));
+    ctx.restore();
+    const fs = Math.max(10, Math.min(13, s * 0.1));
+    label(closetName(d, c), X(c.x), Y(c.y), { size: fs, weight: 600, bg: 'rgba(255,255,255,0.75)' });
+  }
+
+  function drawFixture(f) {
+    ctx.save();
+    ctx.translate(X(f.x), Y(f.y));
+    ctx.rotate((f.rot * Math.PI) / 180);
+    const hw = f.w / 2;
+    const hl = f.l / 2;
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = 'rgba(40,50,70,0.55)';
+    ctx.lineWidth = 1.25;
+    const rr = (x0, y0, x1, y1, r) => {
+      ctx.beginPath();
+      ctx.roundRect(x0 * s, y0 * s, (x1 - x0) * s, (y1 - y0) * s, r * s);
+      ctx.fill();
+      ctx.stroke();
+    };
+    if (f.type === 'shower') {
+      ctx.fillStyle = '#e6eef5';
+      rr(-hw, -hl, hw, hl, 0.02);
+      ctx.strokeStyle = 'rgba(40,50,70,0.3)';
+      ctx.beginPath();
+      ctx.moveTo(-hw * s, -hl * s);
+      ctx.lineTo(hw * s, hl * s);
+      ctx.moveTo(hw * s, -hl * s);
+      ctx.lineTo(-hw * s, hl * s);
+      ctx.stroke();
+      ctx.fillStyle = '#9aa4b2';
+      ctx.beginPath();
+      ctx.arc(0, 0, 0.03 * s, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (f.type === 'bath') {
+      rr(-hw, -hl, hw, hl, 0.06);
+      ctx.fillStyle = '#e6eef5';
+      rr(-hw + 0.07, -hl + 0.07, hw - 0.07, hl - 0.07, 0.15);
+    } else if (f.type === 'toilet') {
+      rr(-hw, -hl, hw, -hl + 0.2, 0.03); // cistern
+      ctx.beginPath();
+      ctx.ellipse(0, (-hl + 0.2 + (f.l - 0.2) / 2 - 0.02) * s, (hw - 0.02) * s, ((f.l - 0.2) / 2) * s, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    } else {
+      ctx.fillStyle = '#e9e4dc';
+      rr(-hw, -hl, hw, hl, 0.02);
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.ellipse(0, 0.02 * s, (hw - 0.12) * s, (hl - 0.12) * s, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawEnsuite(d, e, selected, err) {
+    const L = ensuiteLayout(d.room, e);
+    // tiled floor
+    ctx.fillStyle = '#e9eef3';
+    fillR(L.interior);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(X(L.interior.x0), Y(L.interior.y0), (L.interior.x1 - L.interior.x0) * s, (L.interior.y1 - L.interior.y0) * s);
+    ctx.clip();
+    ctx.strokeStyle = 'rgba(60,80,110,0.12)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let x = 0.3; x < d.room.width; x += 0.3) {
+      ctx.moveTo(Math.round(X(x)) + 0.5, Y(L.interior.y0));
+      ctx.lineTo(Math.round(X(x)) + 0.5, Y(L.interior.y1));
+    }
+    for (let y = 0.3; y < d.room.length; y += 0.3) {
+      ctx.moveTo(X(L.interior.x0), Math.round(Y(y)) + 0.5);
+      ctx.lineTo(X(L.interior.x1), Math.round(Y(y)) + 0.5);
+    }
+    ctx.stroke();
+    ctx.restore();
+    for (const f of L.fixtures) drawFixture(f);
+    ctx.fillStyle = err ? C.error : C.wall;
+    for (const r of L.walls) fillR(r);
+    // door
+    if (L.swing) {
+      const sw = L.swing;
+      ctx.beginPath();
+      ctx.moveTo(X(sw.hinge.x), Y(sw.hinge.y));
+      ctx.arc(X(sw.hinge.x), Y(sw.hinge.y), sw.r * s, sw.a1, sw.a1 + sw.d, sw.d < 0);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(37,99,235,0.07)';
+      ctx.fill();
+      ctx.setLineDash([5, 4]);
+      ctx.strokeStyle = 'rgba(55,65,81,0.7)';
+      ctx.lineWidth = 1.25;
+      ctx.beginPath();
+      ctx.arc(X(sw.hinge.x), Y(sw.hinge.y), sw.r * s, sw.a1, sw.a1 + sw.d, sw.d < 0);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      const end = { x: sw.hinge.x + sw.m.x * sw.r, y: sw.hinge.y + sw.m.y * sw.r };
+      ctx.strokeStyle = C.wall;
+      ctx.lineWidth = Math.max(2, 0.04 * s);
+      ctx.beginPath();
+      ctx.moveTo(X(sw.hinge.x), Y(sw.hinge.y));
+      ctx.lineTo(X(end.x), Y(end.y));
+      ctx.stroke();
+    } else {
+      // sliding leaf parked beside the opening on the bedroom side
+      const g = L.gap;
+      ctx.strokeStyle = C.wall;
+      ctx.lineWidth = Math.max(2, 0.035 * s);
+      ctx.beginPath();
+      if (L.vertical) {
+        const side = e.corner.endsWith('left') ? g.x1 + 0.03 : g.x0 - 0.03;
+        const len = g.y1 - g.y0;
+        ctx.moveTo(X(side), Y(g.y0 + len * 0.55));
+        ctx.lineTo(X(side), Y(g.y1 + len * 0.55));
+      } else {
+        const side = e.corner.startsWith('top') ? g.y1 + 0.03 : g.y0 - 0.03;
+        const len = g.x1 - g.x0;
+        ctx.moveTo(X(g.x0 + len * 0.55), Y(side));
+        ctx.lineTo(X(g.x1 + len * 0.55), Y(side));
+      }
+      ctx.stroke();
+    }
+    if (selected) {
+      ctx.strokeStyle = C.accent;
+      ctx.lineWidth = 2.5;
+      strokeR(L.rect);
+    }
+    const fs = Math.max(10, Math.min(13, s * 0.1));
+    const r = L.interior;
+    label('Ensuite', X((r.x0 + r.x1) / 2), Y((r.y0 + r.y1) / 2), { size: fs, weight: 600, color: C.muted, bg: 'rgba(255,255,255,0.75)' });
+  }
+
   function drawLight(l, selected) {
     const r = Math.max(9, 0.14 * s);
     const x = X(l.x);
@@ -472,7 +676,7 @@ export function createPlanView(canvas, store) {
     drawGrid(room);
 
     // walkway and chair zones under the furniture
-    for (const item of [...d.beds, ...d.desks]) {
+    for (const item of [...d.beds, ...d.desks, ...d.closets]) {
       for (const strip of a.items[item.id].strips) {
         ctx.fillStyle = strip.ok ? C.okStrip : C.badStrip;
         fillR(strip.rect);
@@ -484,9 +688,12 @@ export function createPlanView(canvas, store) {
       }
     }
 
+    // the ensuite covers any walkway zones that run into it
+    if (d.ensuite) drawEnsuite(d, d.ensuite, sel && sel.kind === 'ensuite', a.items.ensuite.error);
     for (const op of d.openings) drawOpening(d, op, sel && sel.kind === 'opening' && sel.id === op.id);
     for (const bed of d.beds) drawBed(bed, a.beds[bed.id], sel && sel.kind === 'bed' && sel.id === bed.id);
     for (const k of d.desks) drawDesk(d, k, a.items[k.id], sel);
+    for (const c of d.closets) drawCloset(d, c, a.items[c.id], sel && sel.kind === 'closet' && sel.id === c.id);
     for (const t of d.lighting.strips) drawStrip(d, t, sel && sel.kind === 'strip' && sel.id === t.id);
     for (const l of d.lighting.lights) drawLight(l, sel && sel.kind === 'light' && sel.id === l.id);
 
@@ -495,10 +702,10 @@ export function createPlanView(canvas, store) {
     label(fmtLen(room.width, u), X(room.width / 2), Y(-WALL_T) - 14, { size: 12, color: C.muted });
     label(fmtLen(room.length, u), X(-WALL_T) - 16, Y(room.length / 2), { size: 12, color: C.muted, rotate: -Math.PI / 2 });
 
-    const selBed = sel && (sel.kind === 'bed' || sel.kind === 'desk') && store.selectedItem();
+    const selBed = sel && (sel.kind === 'bed' || sel.kind === 'desk' || sel.kind === 'closet') && store.selectedItem();
     if (selBed) drawGaps(d, selBed);
 
-    if (!d.beds.length && !d.openings.length && !d.desks.length) {
+    if (!d.beds.length && !d.openings.length && !d.desks.length && !d.closets.length && !d.ensuite) {
       label('Set the room size, then add a door, a window and a bed from the panel.', cw / 2, ch - 22, { size: 13, color: C.muted });
     }
   }
@@ -524,6 +731,9 @@ export function createPlanView(canvas, store) {
       const part = deskPartAt(k, p);
       if (part) return { kind: 'desk', id: k.id, part };
     }
+    for (const c of [...d.closets].reverse()) {
+      if (pointInRect(p, bedRect(c))) return { kind: 'closet', id: c.id };
+    }
     for (const bed of [...d.beds].reverse()) {
       if (pointInRect(p, bedRect(bed))) return { kind: 'bed', id: bed.id };
     }
@@ -537,6 +747,7 @@ export function createPlanView(canvas, store) {
         if (Math.hypot(p.x - g.a.x - u * vx, p.y - g.a.y - u * vy) < 0.06) return { kind: 'strip', id: t.id };
       }
     }
+    if (d.ensuite && pointInRect(p, ensuiteLayout(d.room, d.ensuite).rect)) return { kind: 'ensuite', id: 'ensuite' };
     return null;
   }
 
@@ -566,7 +777,7 @@ export function createPlanView(canvas, store) {
       return;
     }
     store.select({ kind: h.kind, id: h.id, part: h.part });
-    if (h.kind === 'strip') return;
+    if (h.kind === 'strip' || h.kind === 'ensuite') return;
     const item = store.selectedItem();
     store.begin();
     if (h.kind === 'opening') drag = { kind: 'opening', id: h.id, grab: h.along - item.pos };
@@ -582,9 +793,9 @@ export function createPlanView(canvas, store) {
     }
     canvas.style.cursor = 'grabbing';
     const d = store.design;
-    if (drag.kind === 'bed' || drag.kind === 'desk') {
+    if (drag.kind === 'bed' || drag.kind === 'desk' || drag.kind === 'closet') {
       // dragging any piece of a desk setup moves the whole group
-      const bed = (drag.kind === 'bed' ? d.beds : d.desks).find((b) => b.id === drag.id);
+      const bed = { bed: d.beds, desk: d.desks, closet: d.closets }[drag.kind].find((b) => b.id === drag.id);
       if (!bed) return;
       const np = snapBed(d.room, bed, p.x - drag.dx, p.y - drag.dy);
       if (np.x !== bed.x || np.y !== bed.y) store.preview(() => Object.assign(bed, np));

@@ -3,6 +3,10 @@ import { FRAMES, MATTRESS, SIZE_KEYS } from './beds.js';
 import {
   CASES, CHAIRS, COOLERS, DESK_LIMITS, defaultSetup, FINISHES, GPUS, KEYBOARDS, MONITORS,
 } from './desks.js';
+import { CLOSET_FINISHES, CLOSET_LIMITS, CLOSET_STYLES, defaultCloset } from './closets.js';
+import {
+  clampEnsuite, CORNERS, defaultEnsuite, ENS_DOORS, WET,
+} from './ensuite.js';
 import {
   analyze, clamp, fitOpening, headAgainst, HEAD_ROT, snapBed, WALLS, wallInfo,
 } from './geometry.js';
@@ -42,8 +46,39 @@ export function defaultDesign() {
     openings: [],
     beds: [],
     desks: [],
+    closets: [],
+    ensuite: null,
     lighting: { mode: 'day', lights: [], strips: [] },
   };
+}
+
+export function normalizeCloset(raw, id, room) {
+  const c = defaultCloset(id);
+  const k = raw.closet || {};
+  c.closet.style = pick(k.style, CLOSET_STYLES, c.closet.style);
+  c.closet.finish = pick(k.finish, CLOSET_FINISHES, c.closet.finish);
+  for (const f of ['width', 'depth', 'height']) c.closet[f] = clamp(num(k[f], c.closet[f]), CLOSET_LIMITS[f].min, CLOSET_LIMITS[f].max);
+  c.closet.height = Math.min(c.closet.height, room.height);
+  c.rot = ROTS.includes(raw.rot) ? raw.rot : 0;
+  c.x = clamp(num(raw.x, room.width / 2), 0, room.width);
+  c.y = clamp(num(raw.y, room.length / 2), 0, room.length);
+  return c;
+}
+
+export function normalizeEnsuite(raw, room) {
+  if (!raw || typeof raw !== 'object') return null;
+  const e = defaultEnsuite(room);
+  e.corner = pick(raw.corner, CORNERS, e.corner);
+  e.width = num(raw.width, e.width);
+  e.length = num(raw.length, e.length);
+  e.doorSide = raw.doorSide === 'h' ? 'h' : 'v';
+  e.doorWidth = num(raw.doorWidth, e.doorWidth);
+  e.doorAt = num(raw.doorAt, e.doorAt);
+  e.door = pick(raw.door, ENS_DOORS, e.door);
+  e.wet = pick(raw.wet, WET, e.wet);
+  e.toilet = raw.toilet !== false;
+  e.vanity = raw.vanity !== false;
+  return clampEnsuite(room, e);
 }
 
 export const LIGHT_TYPES = { flush: 'Flush mount', pendant: 'Hanging pendant' };
@@ -141,6 +176,12 @@ export function normalize(raw) {
     d.desks.push(normalizeSetup(k, keepId(k.id, 'k', seen), d.room));
   }
 
+  for (const c of Array.isArray(raw.closets) ? raw.closets : []) {
+    if (!c || typeof c !== 'object') continue;
+    d.closets.push(normalizeCloset(c, keepId(c.id, 'c', seen), d.room));
+  }
+  d.ensuite = normalizeEnsuite(raw.ensuite, d.room);
+
   const lt = raw.lighting || {};
   d.lighting.mode = lt.mode === 'night' ? 'night' : 'day';
   for (const l of Array.isArray(lt.lights) ? lt.lights : []) {
@@ -212,6 +253,8 @@ export function exportable(design) {
     openings: design.openings,
     beds: design.beds,
     desks: design.desks,
+    closets: design.closets,
+    ensuite: design.ensuite,
     lighting: design.lighting,
   };
 }
@@ -239,7 +282,7 @@ function save(design) {
 
 export const store = {
   design: load(),
-  selected: null, // { kind: 'bed' | 'opening' | 'desk' | 'light' | 'strip', id, part? }
+  selected: null, // { kind: 'bed' | 'opening' | 'desk' | 'closet' | 'ensuite' | 'light' | 'strip', id, part? }
   view: '2d',
   saved: true,
   past: [],
@@ -339,6 +382,8 @@ export function listFor(d, kind) {
   if (kind === 'bed') return d.beds;
   if (kind === 'opening') return d.openings;
   if (kind === 'desk') return d.desks;
+  if (kind === 'closet') return d.closets;
+  if (kind === 'ensuite') return d.ensuite ? [d.ensuite] : [];
   if (kind === 'light') return d.lighting.lights;
   if (kind === 'strip') return d.lighting.strips;
   return [];
@@ -384,14 +429,19 @@ function placeNew(d, item, listName = 'beds') {
   let first = null;
   let clashFree = null;
   for (const wall of order) {
-    const along = wall === 'top' || wall === 'bottom' ? d.room.width / 2 : d.room.length / 2;
-    const cand = { ...item, ...headAgainst(d.room, { ...item, x: along, y: along }, wall) };
-    Object.assign(cand, snapBed(d.room, cand, cand.x, cand.y));
-    if (!first) first = cand;
-    const st = analyze({ ...d, [listName]: [...d[listName], cand] }).items[cand.id];
-    if (st.error) continue;
-    if (st.strips.every((x) => x.ok)) return cand;
-    if (!clashFree) clashFree = cand;
+    const len = wall === 'top' || wall === 'bottom' ? d.room.width : d.room.length;
+    // the middle of the wall first, then further out in 10 cm steps either side
+    const spots = [len / 2];
+    for (let k = 0.1; k < len / 2; k += 0.1) spots.push(len / 2 - k, len / 2 + k);
+    for (const along of spots) {
+      const cand = { ...item, ...headAgainst(d.room, { ...item, x: along, y: along }, wall) };
+      Object.assign(cand, snapBed(d.room, cand, cand.x, cand.y));
+      if (!first) first = cand;
+      const st = analyze({ ...d, [listName]: [...d[listName], cand] }).items[cand.id];
+      if (st.error) continue;
+      if (st.strips.every((x) => x.ok)) return cand;
+      if (!clashFree) clashFree = cand;
+    }
   }
   return clashFree || first;
 }
@@ -412,6 +462,35 @@ export function addDesk() {
     d.desks.push(placeNew(d, defaultSetup(id), 'desks'));
   });
   store.select({ kind: 'desk', id, part: 'setup' });
+}
+
+export function addCloset() {
+  const id = uid('c');
+  store.commit((d) => {
+    const prev = d.closets[d.closets.length - 1];
+    const c = defaultCloset(id);
+    if (prev) Object.assign(c.closet, prev.closet);
+    c.closet.height = Math.min(c.closet.height, d.room.height);
+    d.closets.push(placeNew(d, c, 'closets'));
+  });
+  store.select({ kind: 'closet', id });
+}
+
+export function addEnsuite() {
+  store.commit((d) => {
+    if (d.ensuite) return false;
+    // pick the corner that clashes with the least furniture
+    let best = null;
+    for (const corner of Object.keys(CORNERS)) {
+      const e = defaultEnsuite(d.room);
+      e.corner = corner;
+      const a = analyze({ ...d, ensuite: e });
+      const n = a.issues.filter((i) => i.level === 'error').length * 10 + a.issues.length;
+      if (!best || n < best.n) best = { e, n };
+    }
+    d.ensuite = best.e;
+  });
+  store.select({ kind: 'ensuite', id: 'ensuite' });
 }
 
 export function addLight() {
@@ -449,6 +528,8 @@ export function deleteSelected() {
     if (s.kind === 'bed') d.beds = d.beds.filter((b) => b.id !== s.id);
     else if (s.kind === 'opening') d.openings = d.openings.filter((o) => o.id !== s.id);
     else if (s.kind === 'desk') d.desks = d.desks.filter((k) => k.id !== s.id);
+    else if (s.kind === 'closet') d.closets = d.closets.filter((c) => c.id !== s.id);
+    else if (s.kind === 'ensuite') d.ensuite = null;
     else if (s.kind === 'light') d.lighting.lights = d.lighting.lights.filter((l) => l.id !== s.id);
     else if (s.kind === 'strip') d.lighting.strips = d.lighting.strips.filter((t) => t.id !== s.id);
     // strips go with the bed or desk they were stuck to
@@ -459,8 +540,9 @@ export function deleteSelected() {
 export function duplicateSelected() {
   const s = store.selected;
   if (!s) return;
-  if (s.kind === 'bed' || s.kind === 'desk' || s.kind === 'light') {
-    const id = uid(s.kind === 'bed' ? 'b' : s.kind === 'desk' ? 'k' : 'l');
+  if (s.kind === 'ensuite') return;
+  if (s.kind === 'bed' || s.kind === 'desk' || s.kind === 'closet' || s.kind === 'light') {
+    const id = uid({ bed: 'b', desk: 'k', closet: 'c', light: 'l' }[s.kind]);
     store.commit((d) => {
       const list = listFor(d, s.kind);
       const src = list.find((b) => b.id === s.id);
@@ -505,9 +587,12 @@ export function duplicateSelected() {
   }
 }
 
+// things that sit on the floor and can be dragged, nudged and rotated
+export const MOVABLE = ['bed', 'desk', 'closet'];
+
 export function rotateSelected() {
   const s = store.selected;
-  if (!s || (s.kind !== 'bed' && s.kind !== 'desk')) return;
+  if (!s || !MOVABLE.includes(s.kind)) return;
   store.commit((d) => {
     const b = listFor(d, s.kind).find((x) => x.id === s.id);
     b.rot = (b.rot + 90) % 360;
@@ -517,10 +602,10 @@ export function rotateSelected() {
 
 export function nudgeSelected(dx, dy) {
   const s = store.selected;
-  if (!s || s.kind === 'strip') return;
+  if (!s || s.kind === 'strip' || s.kind === 'ensuite') return;
   store.commit((d) => {
     const item = listFor(d, s.kind).find((x) => x.id === s.id);
-    if (s.kind === 'bed' || s.kind === 'desk') {
+    if (MOVABLE.includes(s.kind)) {
       const p = snapBed(d.room, item, item.x + dx, item.y + dy);
       // snapping can pull a 10 cm nudge back onto a wall; step past it
       if (Math.abs(p.x - item.x) < 1e-6 && Math.abs(p.y - item.y) < 1e-6) {

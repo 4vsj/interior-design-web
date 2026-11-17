@@ -2,9 +2,11 @@
 // the screen, "top wall" is y = 0). Units are metres.
 import { footprint, FRAMES, MATTRESS, sizeShort } from './beds.js';
 import { deskFootprint, deskLayout } from './desks.js';
+import { CLOSET_STYLES, closetFootprint, closetFrontZone } from './closets.js';
+import { ensuiteLayout, FIXTURE_NAME } from './ensuite.js';
 
-/** Beds and desk setups share placement maths; a desk setup has a `desk` field. */
-const fpOf = (item) => (item.desk ? deskFootprint(item) : footprint(item));
+/** Beds, desk setups and closets share placement maths; a setup has `desk`, a closet `closet`. */
+const fpOf = (item) => (item.desk ? deskFootprint(item) : item.closet ? closetFootprint(item) : footprint(item));
 
 export const WALL_T = 0.1;
 export const GRID = 0.1;
@@ -219,6 +221,14 @@ export function deskName(design, s) {
   return `Desk setup ${design.desks.indexOf(s) + 1}`;
 }
 
+export function closetName(design, c) {
+  return `Closet ${design.closets.indexOf(c) + 1}`;
+}
+
+export function closetDescription(c) {
+  return `${CLOSET_STYLES[c.closet.style].split(' ')[0]} · ${Math.round(c.closet.width * 100)} cm wide`;
+}
+
 export function bedDescription(bed) {
   return `${sizeShort(bed)} · ${FRAMES[bed.frame].label}`;
 }
@@ -241,6 +251,7 @@ const clipToRoom = (r, room) => ({
   x1: Math.min(r.x1, room.width), y1: Math.min(r.y1, room.length),
 });
 const nonEmpty = (r) => r.x1 - r.x0 > EPS && r.y1 - r.y0 > EPS;
+const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
 
 /**
  * Collisions (errors) and walkway shortfalls (tips) for beds and desk setups.
@@ -253,15 +264,21 @@ export function analyze(design) {
   const issues = [];
   const items = {};
   const desks = design.desks || [];
+  const closets = design.closets || [];
+  const ens = design.ensuite ? ensuiteLayout(room, design.ensuite) : null;
   // every solid footprint, tagged with its owner
   const owners = [
     ...design.beds.map((b) => ({ kind: 'bed', item: b, name: bedName(design, b), rects: [bedRect(b)] })),
     ...desks.map((s) => ({ kind: 'desk', item: s, name: deskName(design, s), rects: deskSolids(s) })),
+    ...closets.map((c) => ({ kind: 'closet', item: c, name: closetName(design, c), rects: [bedRect(c)] })),
   ];
+  if (ens) owners.push({ kind: 'ensuite', item: design.ensuite, name: 'the ensuite', rects: [ens.rect] });
   const swings = design.openings
     .filter((o) => o.type === 'door')
-    .map((o) => ({ door: o, sw: doorSwing(room, o) }))
+    .map((o) => ({ name: openingName(design, o), sw: doorSwing(room, o) }))
     .filter((s) => s.sw.inward);
+  // an ensuite door that opens into the bedroom needs the same clear arc
+  if (ens && ens.swing && ens.swing.inward) swings.push({ name: 'the ensuite door', sw: ens.swing, ensuite: true });
   for (const o of owners) items[o.item.id] = { error: false, strips: [] };
   const hitsOthers = (rect, self) => owners.some((o) => o !== self && o.rects.some((r) => rectsOverlap(rect, r)));
 
@@ -269,7 +286,7 @@ export function analyze(design) {
     const st = items[o.item.id];
     const err = (text) => {
       st.error = true;
-      issues.push({ level: 'error', id: o.item.id, kind: o.kind, text });
+      issues.push({ level: 'error', id: o.item.id, kind: o.kind, text: cap(text) });
     };
     if (o.rects.some((r) => !rectInside(r, roomRect))) err(`${o.name} runs into a wall.`);
     for (let j = i + 1; j < owners.length; j++) {
@@ -279,8 +296,9 @@ export function analyze(design) {
         err(`${o.name} overlaps ${p.name}.`);
       }
     }
-    for (const { door, sw } of swings) {
-      if (o.rects.some((r) => rectHitsSwing(r, sw))) err(`${o.name} blocks ${openingName(design, door)} from opening.`);
+    for (const sw of swings) {
+      if (sw.ensuite && o.kind === 'ensuite') continue;
+      if (o.rects.some((r) => rectHitsSwing(r, sw.sw))) err(`${o.name} blocks ${sw.name} from opening.`);
     }
 
     if (o.kind === 'bed') {
@@ -300,6 +318,25 @@ export function analyze(design) {
       if (shortFoot) where.push('the foot');
       if (where.length) {
         issues.push({ level: 'tip', id: o.item.id, kind: o.kind, text: `${o.name} has less than ${design.units === 'ft' ? '2 ft' : '60 cm'} of walkway at ${where.join(' and ')}.` });
+      }
+    } else if (o.kind === 'closet') {
+      const z = closetFrontZone(o.item);
+      const wr = localRectToWorld(o.item, z);
+      const ok = rectInside(wr, roomRect) && !hitsOthers(wr, o);
+      const draw = clipToRoom(wr, room);
+      if (nonEmpty(draw)) st.strips.push({ rect: draw, ok });
+      if (!ok) {
+        const cm = design.units === 'ft' ? `${Math.round(z.need / 0.3048 * 10) / 10} ft` : `${Math.round(z.need * 100)} cm`;
+        const what = o.item.closet.style === 'open' ? 'to reach the rail' : 'to open the doors';
+        issues.push({ level: 'tip', id: o.item.id, kind: o.kind, text: `${o.name} has less than ${cm} in front ${what}.` });
+      }
+    } else if (o.kind === 'ensuite') {
+      for (const t of ens.missing) {
+        issues.push({ level: 'tip', id: o.item.id, kind: o.kind, text: `The ensuite is too small for the ${FIXTURE_NAME[t]}. Make it bigger or remove something.` });
+      }
+      if (ens.swing && !ens.swing.inward) {
+        const hit = ens.fixtures.find((f) => rectHitsSwing(f.rect, ens.swing));
+        if (hit) issues.push({ level: 'tip', id: o.item.id, kind: o.kind, text: `The ensuite door hits the ${FIXTURE_NAME[hit.type]} when it opens. Move the door or make it sliding.` });
       }
     } else {
       const L = deskLayout(o.item);

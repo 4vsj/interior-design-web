@@ -75,3 +75,28 @@ export function wallTexture(THREE) {
   tex.repeat.set(4, 4);
   return tex;
 }
+
+/** Pale square floor tiles with grout lines. One texture tile covers 0.6 × 0.6 m (four tiles). */
+export function tileTexture(THREE, renderer) {
+  const size = 256;
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const g = c.getContext('2d');
+  let seed = 11;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  g.fillStyle = '#b9bec4';
+  g.fillRect(0, 0, size, size);
+  const half = size / 2;
+  const grout = 3;
+  for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) {
+    const v = 226 + Math.round(rnd() * 8);
+    g.fillStyle = `rgb(${v},${v + 2},${v + 4})`;
+    g.fillRect(i * half + grout / 2, j * half + grout / 2, half - grout, half - grout);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  tex.userData.tile = 0.6;
+  return tex;
+}

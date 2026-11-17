@@ -7,8 +7,9 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { floorTexture, wallTexture } from './textures.js';
-import { buildBed3D, buildSetup3D } from './models3d.js';
+import { floorTexture, tileTexture, wallTexture } from './textures.js';
+import { buildBed3D, buildCloset3D, buildFixture3D, buildSetup3D } from './models3d.js';
+import { ensuiteLayout } from './ensuite.js';
 import { bedRect, deskSolids, doorSwing, snapBed, WALL_T, WALLS, wallInfo } from './geometry.js';
 import { stripSegments, TEMP_COLOR } from './lighting.js';
 
@@ -100,7 +101,9 @@ export function createScene(container, store) {
   const overlayGroup = new THREE.Group();
   const desksGroup = new THREE.Group();
   const lightsGroup = new THREE.Group();
-  scene.add(roomGroup, bedsGroup, overlayGroup, desksGroup, lightsGroup);
+  const closetsGroup = new THREE.Group();
+  const ensuiteGroup = new THREE.Group();
+  scene.add(roomGroup, bedsGroup, overlayGroup, desksGroup, lightsGroup, closetsGroup, ensuiteGroup);
 
   const wallMatBase = new THREE.MeshStandardMaterial({ color: 0xffffff, map: wallTexture(THREE), roughness: 0.92 });
   const skirtMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.45 });
@@ -110,6 +113,9 @@ export function createScene(container, store) {
   const floorTex = floorTexture(THREE, renderer);
   const floorMat = new THREE.MeshStandardMaterial({ color: 0xffffff, map: floorTex, roughness: 0.55 });
   const stubMat = new THREE.MeshStandardMaterial({ color: 0x9aa0a8, roughness: 0.9 });
+  const tileTex = tileTexture(THREE, renderer);
+  const tileMat = new THREE.MeshStandardMaterial({ color: 0xffffff, map: tileTex, roughness: 0.35 });
+  const bathWallMat = new THREE.MeshStandardMaterial({ color: 0xf4f6f8, map: wallMatBase.map, roughness: 0.85 });
 
   // glow for lamps, LEDs and RGB at night; daytime renders straight to screen
   const composer = new EffectComposer(renderer);
@@ -140,10 +146,14 @@ export function createScene(container, store) {
 
   let walls = []; // { group, stub, normal: Vector3, center: Vector3 }
   const STUB_H = 0.12; // cutaway height for walls between the camera and the room
+  const ENS_CUT = 1.0; // ensuite walls are cut at this height from outside, so they still read as walls
   let roomKey = '';
   let frameKey = '';
   const beds = new Map(); // id -> { key, group }
   const desks = new Map(); // id -> { key, group }
+  const closets = new Map(); // id -> { key, group }
+  let ensuiteKey = '';
+  let ensuiteWalls = null; // { full, stub } groups for the partition walls
   let lightsKey = '';
   let cycling = []; // strips with the slow colour cycle: { base: Color, lights, mats }
   let dirty = true;
@@ -263,6 +273,109 @@ export function createScene(container, store) {
     const span = Math.max(W, L);
     sun.position.set(W / 2 + span * 0.5, 7, L / 2 + span * 0.9);
     sun.target.position.set(W / 2, 0, L / 2);
+  }
+
+  function buildEnsuite(d) {
+    clearGroup(ensuiteGroup);
+    ensuiteWalls = null;
+    const e = d.ensuite;
+    if (!e) return;
+    const H = d.room.height;
+    const L = ensuiteLayout(d.room, e);
+    const r = L.interior;
+    const iw = r.x1 - r.x0;
+    const il = r.y1 - r.y0;
+    tileTex.repeat.set(iw / tileTex.userData.tile, il / tileTex.userData.tile);
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(iw, il), tileMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.set((r.x0 + r.x1) / 2, 0.002, (r.y0 + r.y1) / 2);
+    floor.receiveShadow = true;
+    ensuiteGroup.add(floor);
+
+    const full = new THREE.Group();
+    const stub = new THREE.Group();
+    const slab = (into, mat, q, y0, y1) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(q.x1 - q.x0, y1 - y0, q.y1 - q.y0), mat);
+      m.position.set((q.x0 + q.x1) / 2, (y0 + y1) / 2, (q.y0 + q.y1) / 2);
+      m.castShadow = true;
+      m.receiveShadow = true;
+      into.add(m);
+      return m;
+    };
+    for (const q of L.walls) {
+      slab(full, bathWallMat, q, 0, H);
+      slab(stub, bathWallMat, q, 0, ENS_CUT);
+    }
+    const doorH = Math.min(2.04, H - 0.08);
+    slab(full, bathWallMat, L.gap, doorH, H);
+    // door frame
+    const g = L.gap;
+    const f = 0.04;
+    const jamb = L.vertical
+      ? [{ x0: g.x0 - 0.01, y0: g.y0, x1: g.x1 + 0.01, y1: g.y0 + f }, { x0: g.x0 - 0.01, y0: g.y1 - f, x1: g.x1 + 0.01, y1: g.y1 }]
+      : [{ x0: g.x0, y0: g.y0 - 0.01, x1: g.x0 + f, y1: g.y1 + 0.01 }, { x0: g.x1 - f, y0: g.y0 - 0.01, x1: g.x1, y1: g.y1 + 0.01 }];
+    for (const q of jamb) slab(full, trimMatBase, q, 0, doorH);
+    if (L.swing) {
+      const sw = L.swing;
+      const ang = sw.a1 + sw.d * 0.3;
+      const leaf = new THREE.Mesh(new THREE.BoxGeometry(sw.r - 0.05, doorH - 0.02, 0.04), doorMatBase);
+      const dir = { x: Math.cos(ang), y: Math.sin(ang) };
+      const hx = sw.hinge.x + sw.m.x * 0.02;
+      const hy = sw.hinge.y + sw.m.y * 0.02;
+      leaf.position.set(hx + dir.x * (sw.r / 2), doorH / 2, hy + dir.y * (sw.r / 2));
+      leaf.rotation.y = -ang;
+      leaf.castShadow = true;
+      full.add(leaf);
+    } else {
+      // sliding leaf parked beside the opening on the bedroom side
+      const left = e.corner.endsWith('left');
+      const top = e.corner.startsWith('top');
+      const len = L.vertical ? g.y1 - g.y0 : g.x1 - g.x0;
+      const q = L.vertical
+        ? { x0: left ? g.x1 + 0.01 : g.x0 - 0.05, x1: left ? g.x1 + 0.05 : g.x0 - 0.01, y0: g.y0 + len * 0.55, y1: g.y1 + len * 0.55 }
+        : { y0: top ? g.y1 + 0.01 : g.y0 - 0.05, y1: top ? g.y1 + 0.05 : g.y0 - 0.01, x0: g.x0 + len * 0.55, x1: g.x1 + len * 0.55 };
+      slab(full, doorMatBase, q, 0.01, doorH - 0.01);
+    }
+    stub.visible = false;
+    ensuiteGroup.add(full, stub);
+    ensuiteWalls = { full, stub };
+
+    for (const fx of L.fixtures) {
+      const m = buildFixture3D(fx);
+      m.position.set(fx.x, 0, fx.y);
+      m.rotation.y = (-fx.rot * Math.PI) / 180;
+      if (fx.flip) m.scale.x = -1;
+      ensuiteGroup.add(m);
+    }
+  }
+
+  function syncClosets(d) {
+    const seen = new Set();
+    for (const c of d.closets) {
+      seen.add(c.id);
+      const key = JSON.stringify(c.closet);
+      let rec = closets.get(c.id);
+      if (!rec || rec.key !== key) {
+        if (rec) {
+          disposeTree(rec.group);
+          closetsGroup.remove(rec.group);
+        }
+        const group = buildCloset3D(c);
+        group.traverse((o) => { o.userData.closetId = c.id; });
+        closetsGroup.add(group);
+        rec = { key, group };
+        closets.set(c.id, rec);
+      }
+      rec.group.position.set(c.x, 0, c.y);
+      rec.group.rotation.y = (-c.rot * Math.PI) / 180;
+    }
+    for (const [id, rec] of closets) {
+      if (!seen.has(id)) {
+        disposeTree(rec.group);
+        closetsGroup.remove(rec.group);
+        closets.delete(id);
+      }
+    }
   }
 
   function syncDesks(d) {
@@ -584,6 +697,37 @@ export function createScene(container, store) {
       }
       overlayGroup.add(floorPoly(pts, sw.inward ? 0x2563eb : 0x6b7280, 0.16, 0.004));
     }
+    const selC = store.selected;
+    for (const c of d.closets) {
+      const st = store.analysis.items[c.id];
+      const show = selC && selC.kind === 'closet' && selC.id === c.id;
+      for (const strip of st.strips) {
+        if (!show && strip.ok) continue;
+        overlayGroup.add(floorPoly(rectPts(strip.rect), strip.ok ? 0x22c55e : 0xf59e0b, strip.ok ? 0.14 : 0.35, 0.003));
+      }
+      if (st.error || show) {
+        const r = bedRect(c);
+        overlayGroup.add(floorPoly(rectPts({ x0: r.x0 - 0.04, y0: r.y0 - 0.04, x1: r.x1 + 0.04, y1: r.y1 + 0.04 }),
+          st.error ? 0xdc2626 : 0x2563eb, st.error ? 0.45 : 0.35, 0.005));
+      }
+    }
+    if (d.ensuite) {
+      const L = ensuiteLayout(d.room, d.ensuite);
+      if (L.swing) {
+        const sw = L.swing;
+        const pts = [{ ...sw.hinge }];
+        for (let i = 0; i <= 24; i++) {
+          const t = sw.a1 + (sw.d * i) / 24;
+          pts.push({ x: sw.hinge.x + Math.cos(t) * sw.r, y: sw.hinge.y + Math.sin(t) * sw.r });
+        }
+        overlayGroup.add(floorPoly(pts, 0x2563eb, 0.16, 0.004));
+      }
+      const err = store.analysis.items.ensuite.error;
+      if (err || (store.selected && store.selected.kind === 'ensuite')) {
+        const r = L.rect;
+        overlayGroup.add(floorPoly(rectPts(r), err ? 0xdc2626 : 0x2563eb, 0.2, 0.004));
+      }
+    }
     const sel = store.selected;
     for (const bed of d.beds) {
       const st = a.beds[bed.id];
@@ -617,8 +761,14 @@ export function createScene(container, store) {
       frameKey = fk;
       frameCamera(d);
     }
+    const ek = JSON.stringify([d.room, d.ensuite]);
+    if (ek !== ensuiteKey) {
+      ensuiteKey = ek;
+      buildEnsuite(d);
+    }
     syncBeds(d);
     syncDesks(d);
+    syncClosets(d);
     const lk = JSON.stringify([d.room, d.lighting.lights, d.lighting.strips,
       d.lighting.strips.some((t) => t.attach !== 'ceiling') ? [d.beds, d.desks] : 0]);
     if (lk !== lightsKey) {
@@ -642,6 +792,18 @@ export function createScene(container, store) {
       }
       w.group.visible = !outside;
       w.stub.visible = outside;
+    }
+    // ensuite walls drop to stubs whenever the camera is outside the room, so the bathroom shows from above
+    if (ensuiteWalls) {
+      const d = store.design;
+      const p = camera.position;
+      const out = p.x < 0 || p.z < 0 || p.x > d.room.width || p.z > d.room.length || p.y > d.room.height;
+      if (ensuiteWalls.full.visible === out) {
+        renderer.shadowMap.needsUpdate = true;
+        dirty = true;
+      }
+      ensuiteWalls.full.visible = !out;
+      ensuiteWalls.stub.visible = out;
     }
   }
 
@@ -710,10 +872,11 @@ export function createScene(container, store) {
     return ray.ray.intersectPlane(plane, p) ? p : null;
   }
   function itemUnder() {
-    const hits = ray.intersectObjects([...bedsGroup.children, ...desksGroup.children], true).filter((h) => h.object.isMesh);
+    const hits = ray.intersectObjects([...bedsGroup.children, ...desksGroup.children, ...closetsGroup.children], true).filter((h) => h.object.isMesh);
     if (!hits.length) return null;
     const u = hits[0].object.userData;
     if (u.bedId) return { kind: 'bed', id: u.bedId };
+    if (u.closetId) return { kind: 'closet', id: u.closetId };
     if (u.deskId) return { kind: 'desk', id: u.deskId, part: u.part || 'desk' };
     return null;
   }
@@ -727,7 +890,7 @@ export function createScene(container, store) {
     if (!hit) return; // let the orbit controls handle it
     e.stopPropagation();
     e.preventDefault();
-    const list = hit.kind === 'bed' ? store.design.beds : store.design.desks;
+    const list = { bed: store.design.beds, desk: store.design.desks, closet: store.design.closets }[hit.kind];
     const bed = list.find((b) => b.id === hit.id);
     const p = floorHit();
     if (!bed || !p) return;
@@ -746,7 +909,7 @@ export function createScene(container, store) {
     renderer.domElement.style.cursor = 'grabbing';
     const p = floorHit();
     const d = store.design;
-    const bed = (drag.kind === 'bed' ? d.beds : d.desks).find((b) => b.id === drag.id);
+    const bed = { bed: d.beds, desk: d.desks, closet: d.closets }[drag.kind].find((b) => b.id === drag.id);
     if (!p || !bed) return;
     const np = snapBed(d.room, bed, p.x - drag.dx, p.z - drag.dz);
     if (np.x !== bed.x || np.y !== bed.y) store.preview(() => Object.assign(bed, np));
